@@ -10,7 +10,7 @@ def main():
         exists = os.path.isdir(src_path)
 
         if not exists:
-            src_path = "../" + src_path
+            src_path = "../../" + src_path
             exists = os.path.exists(src_path)
 
         if exists:
