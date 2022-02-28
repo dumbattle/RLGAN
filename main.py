@@ -34,7 +34,7 @@ def main():
         for _ in range(100):
             mean = agent.actor(img)
             action = agent.sample(mean, 1)
-            img = img + action
+            img = agent.update_img(img, action)
         d_buf.add(img)
 
     g_trainer = A2CTrainer(agent, discriminator, d_buf)

@@ -22,7 +22,11 @@ class A2CAgent:
 
     @staticmethod
     def sample(m, sd):
-        return tf.random.normal(m.shape, m, sd) / 255 / settings.max_action
+        return tf.random.normal(m.shape, m, sd)
+
+    @staticmethod
+    def update_img(image, action):
+        return image + action / 255 / settings.max_action
 
     @staticmethod
     def log_normal_pdf(sample, mean, sd):
@@ -66,8 +70,8 @@ class A2CTrainer:
         self.agent = agent
         self.critic = tf.keras.models.clone_model(disc)
         self.disc = disc
-        self.a_opt = tf.keras.optimizers.Adam(learning_rate=.0003)
-        self.c_opt = tf.keras.optimizers.Adam(learning_rate=.0003)
+        self.a_opt = tf.keras.optimizers.Adam(learning_rate=.0001)
+        self.c_opt = tf.keras.optimizers.Adam(learning_rate=.0001)
 
     def _run_episode(self, episode_num):
         state = tf.random.uniform([1, *self.input_shape], 0, 1)
@@ -75,12 +79,11 @@ class A2CTrainer:
         traj = _Trajectory(self.input_shape)
         pbar = tqdm(range(settings.Training.max_episode_length), f"Episode {episode_num}", colour='green')
         for _ in pbar:
-            action, reward, next_state, value = self._step(state)
-
+            action, reward, next_state = self._step(state)
             traj.add_experience(state, action, reward)
 
             state = next_state
-            pbar.set_postfix_str(f"Reward: {tf.math.sigmoid(reward)} Value: {tf.math.sigmoid(value)}")
+            pbar.set_postfix_str(f"Reward: {tf.math.sigmoid(reward)}")
 
             img = tf.squeeze(tf.clip_by_value(state, 0, 1)).numpy()
             img = cv2.resize(img, (img.shape[0] * 5, img.shape[1] * 5), interpolation=cv2.INTER_NEAREST)
@@ -88,7 +91,8 @@ class A2CTrainer:
             cv2.waitKey(1)
 
         traj.end()
-        self.fake_buffer.add(tf.clip_by_value(state, 0, 1))
+        if reward > .9:
+            self.fake_buffer.add(tf.clip_by_value(state, 0, 1))
 
         self._train_step(
             tf.convert_to_tensor(traj.state_buffer),
@@ -103,23 +107,21 @@ class A2CTrainer:
     def _step(self, state):
         mean = self.agent.actor(state)
         action = self.agent.sample(mean, 1)
-        next_state = state + action
+        next_state = self.agent.update_img(state, action)
 
         reward = tf.squeeze(self.disc(next_state))
-        value = self.critic(state)
-        return action, reward, next_state, value
+        return action, reward, next_state
 
     @tf.function
     def _train_step(self, states, actions, rewards):
         with tf.GradientTape() as tape:
             mean = self.agent.actor.call(states)
             log_probs = self.agent.log_normal_pdf(actions, mean, 1.)
+            log_probs = tf.reduce_sum(log_probs, [1, 2, 3])
 
             critic_s = tf.squeeze(self.critic(states))
 
             adv = rewards - critic_s
-
-            log_probs = tf.reduce_sum(log_probs, [1, 2, 3])
 
             actor_loss = -tf.reduce_mean(log_probs * tf.stop_gradient(adv))
             critic_loss = tf.reduce_mean(tf.math.square(adv))
@@ -131,7 +133,7 @@ class A2CTrainer:
         self.a_opt.apply_gradients(
             zip(grad[:len(self.agent.actor.trainable_variables)], self.agent.actor.trainable_variables))
         self.c_opt.apply_gradients(
-            zip(grad[len(self.agent.actor.trainable_variables):], self.agent.critic.trainable_variables))
+            zip(grad[len(self.agent.actor.trainable_variables):], self.critic.trainable_variables))
 
     def run(self):
         self.critic.set_weights(self.disc.get_weights())
@@ -141,5 +143,5 @@ class A2CTrainer:
             r = self._run_episode(e + 1)
 
             mr = mr * .8 + r * .2
-            if r > 0.99:
+            if mr > 0.99:
                 return

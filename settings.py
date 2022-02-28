@@ -1,7 +1,7 @@
 class DenseNet:
     num_blocks = 4
     layers_per_block = 4
-    growth_rate = 12
+    growth_rate = 8
     reduction = .5
 
     activation = 'relu'
