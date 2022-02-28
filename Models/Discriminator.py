@@ -10,7 +10,7 @@ def Discriminator(input_shape):
     return Sequential([
         DenseNet(input_shape),
         layers.Dense(64, activation='relu'),
-        layers.Dense(1, activation='sigmoid'),
+        layers.Dense(1),
     ])
 
 
@@ -39,10 +39,10 @@ class DiscriminatorBuffer:
 
 
 class DiscriminatorTrainer:
-    cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=False)
+    cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
 
     def __init__(self, train_buffer, real_dataset, discriminator):
-        self.optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)
+        self.optimizer = tf.keras.optimizers.Adam(learning_rate=0.0001)
         self.buffer = train_buffer
         self.dataset = real_dataset
         self.disc = discriminator
@@ -75,7 +75,8 @@ class DiscriminatorTrainer:
                 fake = self.buffer.sample(settings.Discriminator.Training.batch_size)
                 loss = self._disc_train_step(batch, fake)
                 total_loss += tf.reduce_mean(loss)
-                pbar.set_postfix_str(f"loss: {total_loss / num}")
+                total_loss = total_loss / num
+                pbar.set_postfix_str(f"loss: {total_loss}")
             pbar.close()
 
             if total_loss < .01:

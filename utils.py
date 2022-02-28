@@ -9,15 +9,15 @@ def imshow(title, img):
 
     h, w, _ = im.shape
 
-    # Make a checkerboard background image same size, dark squares are grey(102), light squares are grey(152)
-    bg = np.fromfunction(np.vectorize(lambda i, j: .5 + .25 * ((i+j) % 2)), (16, 16))
-
-    # Resize to square same length as longer side (so squares stay square), then trim
     if h > w:
         longer = h
     else:
         longer = w
+
+    # Make a checkerboard background image same size, dark squares are grey(102), light squares are grey(152)
+    bg = np.fromfunction(np.vectorize(lambda i, j: .5 + .25 * ((i+j) % 2)), (int(longer / 25), int(longer / 25)))
     bg = cv2.resize(bg, (longer, longer), interpolation=cv2.INTER_NEAREST)
+
     # Trim to correct size
     bg = bg[:h, :w]
     # Blend, using result = alpha*overlay + (1-alpha)*background
