@@ -4,21 +4,31 @@ import tensorflow as tf
 import settings
 
 
-def dense_block(inp, num_channels):
-    for i in range(settings.DenseNet.layers_per_block):
+def dense_block(inp, num_channels, num_layers=None, growth_rate=None, activation=None):
+    if num_layers is None:
+        num_layers = settings.DenseNet.layers_per_block
+
+    if growth_rate is None:
+        growth_rate = settings.DenseNet.growth_rate
+
+    if activation is None:
+        activation = settings.DenseNet.activation
+
+    x = None
+    for i in range(num_layers):
         # bottleneck
         x = layers.BatchNormalization()(inp)
-        x = layers.Activation(settings.DenseNet.activation)(x)
-        x = layers.Conv2D(4 * settings.DenseNet.growth_rate, 1, use_bias=False,)(x)
+        x = layers.Activation(activation)(x)
+        x = layers.Conv2D(4 * growth_rate, 1, use_bias=False)(x)
 
         # conv
         x = layers.BatchNormalization()(x)
-        x = layers.Activation(settings.DenseNet.activation)(x)
-        x = layers.Conv2D(settings.DenseNet.growth_rate, 3, padding='same', use_bias=False,)(x)
+        x = layers.Activation(activation)(x)
+        x = layers.Conv2D(growth_rate, 3, padding='same', use_bias=False)(x)
 
         # concat
         inp = layers.Concatenate()([inp, x])
-        num_channels += settings.DenseNet.growth_rate
+        num_channels += growth_rate
 
     return x, num_channels
 
@@ -27,10 +37,11 @@ def transition(x, num_channels):
     x = layers.BatchNormalization()(x)
     x = layers.Activation(settings.DenseNet.activation)(x)
 
-    x = layers.Conv2D(settings.DenseNet.growth_rate, 3, padding='same', use_bias=False, )(x)
-    num_channels = int(num_channels * settings.DenseNet.reduction)
+    x = layers.Conv2D(settings.DenseNet.growth_rate, 3, padding='same', use_bias=False)(x)
     x = layers.Conv2D(num_channels, 1, use_bias=False)(x)
     x = layers.AveragePooling2D(2, strides=2)(x)
+
+    num_channels = int(num_channels * settings.DenseNet.reduction)
     return x, num_channels
 
 

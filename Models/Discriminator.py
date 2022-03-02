@@ -37,6 +37,9 @@ class DiscriminatorBuffer:
 
         return tf.convert_to_tensor(self.images[batch_indices])
 
+    def clear(self):
+        self.count = 0
+
 
 class DiscriminatorTrainer:
     cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
@@ -80,4 +83,5 @@ class DiscriminatorTrainer:
             pbar.close()
 
             if total_loss < .01:
+                self.buffer.count = 0
                 return

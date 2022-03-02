@@ -2,7 +2,7 @@ import tensorflow as tf
 from tensorflow.keras import layers
 from tqdm import tqdm
 
-from  settings import A2C as settings
+from settings import A2C as settings
 from DenseNet import dense_block
 import numpy as np
 import cv2
@@ -15,7 +15,7 @@ class A2CAgent:
 
         # actor
         a = layers.Input(shape=input_shape)
-        x = dense_block(a, 0)[0]
+        x = dense_block(a, 0, num_layers=6, growth_rate=6)[0]
         mean = layers.Conv2D(4, 3, activation="tanh", padding="same")(x) * settings.max_action
 
         self.actor = tf.keras.Model(inputs=a, outputs=mean)
@@ -57,9 +57,9 @@ class _Trajectory:
 
     def end(self):
         gamma = .9
-        reward = self.reward_buffer[-1]
+        reward = self.reward_buffer[-1] / (1 - gamma)
         for i in reversed(range(len(self.reward_buffer))):
-            reward = reward * gamma + self.reward_buffer[i] * (1 - gamma)
+            reward = reward * gamma + self.reward_buffer[i]
             self.reward_buffer[i] = reward
 
 
@@ -70,20 +70,20 @@ class A2CTrainer:
         self.agent = agent
         self.critic = tf.keras.models.clone_model(disc)
         self.disc = disc
-        self.a_opt = tf.keras.optimizers.Adam(learning_rate=.0001)
-        self.c_opt = tf.keras.optimizers.Adam(learning_rate=.0001)
+        self.a_opt = tf.keras.optimizers.Adam(learning_rate=settings.Training.actor_lr)
+        self.c_opt = tf.keras.optimizers.Adam(learning_rate=settings.Training.critic_lr)
 
-    def _run_episode(self, episode_num):
+    def _run_episode(self, pbar):
         state = tf.random.uniform([1, *self.input_shape], 0, 1)
         reward = None
         traj = _Trajectory(self.input_shape)
-        pbar = tqdm(range(settings.Training.max_episode_length), f"Episode {episode_num}", colour='green')
-        for _ in pbar:
+        for _ in range(settings.Training.max_episode_length):
             action, reward, next_state = self._step(state)
             traj.add_experience(state, action, reward)
 
             state = next_state
-            pbar.set_postfix_str(f"Reward: {tf.math.sigmoid(reward)}")
+            pbar.set_postfix_str(f"Reward: {tf.sigmoid(reward)}")
+            pbar.update()
 
             img = tf.squeeze(tf.clip_by_value(state, 0, 1)).numpy()
             img = cv2.resize(img, (img.shape[0] * 5, img.shape[1] * 5), interpolation=cv2.INTER_NEAREST)
@@ -91,15 +91,15 @@ class A2CTrainer:
             cv2.waitKey(1)
 
         traj.end()
+
+        # only save good images
         if reward > .9:
-            self.fake_buffer.add(tf.clip_by_value(state, 0, 1))
+            self.fake_buffer.add(state)
 
         self._train_step(
             tf.convert_to_tensor(traj.state_buffer),
             tf.convert_to_tensor(traj.action_buffer),
             tf.convert_to_tensor(traj.reward_buffer))
-
-        pbar.close()
 
         return tf.math.sigmoid(reward)
 
@@ -137,10 +137,13 @@ class A2CTrainer:
 
     def run(self):
         self.critic.set_weights(self.disc.get_weights())
+        pbar = tqdm(total=settings.Training.max_episode_length, colour='green')
 
         mr = 0
         for e in range(settings.Training.num_episodes):
-            r = self._run_episode(e + 1)
+            pbar.reset()
+            pbar.set_description(f"Episode {e+1}")
+            r = self._run_episode(pbar)
 
             mr = mr * .8 + r * .2
             if mr > 0.99:

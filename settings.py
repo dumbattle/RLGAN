@@ -8,6 +8,9 @@ class DenseNet:
 
 
 class Discriminator:
+    size = 10000
+    new_size = 1000
+
     class Training:
         batch_size = 32
 
@@ -17,6 +20,8 @@ class A2C:
     max_action = 3
 
     class Training:
+        actor_lr = 1e-4
+        critic_lr = 1e-4
         max_episode_length = 150
         num_episodes = 10000
         gamma = .9

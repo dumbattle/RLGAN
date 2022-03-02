@@ -27,6 +27,7 @@ def main():
 
     d_buf = DiscriminatorBuffer(10000, input_shape)
     d_trainer = DiscriminatorTrainer(d_buf, dataset, discriminator)
+    g_trainer = A2CTrainer(agent, discriminator, d_buf)
 
     for _ in tqdm(range(200), "Initializing Discriminator Buffer"):
         img = tf.random.uniform((1, *input_shape), 0, 1)
@@ -37,7 +38,6 @@ def main():
             img = agent.update_img(img, action)
         d_buf.add(img)
 
-    g_trainer = A2CTrainer(agent, discriminator, d_buf)
     while True:
         d_trainer.train(100)
         g_trainer.run()

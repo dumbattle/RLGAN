@@ -1,0 +1,14 @@
+- Self-Attention GAN
+    a) for discriminator
+    b) apply to generator
+
+- Discriminator Training
+    a) Use generated images directly from agent
+    b) use some from buffer
+    c) ratio - 2 : 1 : 1 :: real : from generator : from buffer
+
+- Mask agent action
+    a) flat rate (ie. 0.8)
+    b) range (ie [0, 0.8])
+
+    Less actions hopefully will allow for better training
