@@ -1,5 +1,6 @@
 class DenseNet:
     num_blocks = 4
+    self_attention = []
     layers_per_block = 4
     growth_rate = 8
     reduction = .5
@@ -20,9 +21,12 @@ class A2C:
     max_action = 3
 
     class Training:
+        update_interval = 32
+        num_updates_per_episode = 6
+        max_episode_length = update_interval * num_updates_per_episode
+
         actor_lr = 1e-4
         critic_lr = 1e-4
-        max_episode_length = 150
         num_episodes = 10000
         gamma = .9
 
@@ -46,14 +50,14 @@ class DDPGAgent:
 
 
 class SACAgent:
-    max_action = .01
+    max_action = 3
     noise = 1e-6
 
     class Training:
         color = 'blue'
-        batch_size = 4
-        buffer_size = 10000
-        max_episode_length = 100
+        batch_size = 16
+        buffer_size = 5000
+        max_episode_length = 150
         num_episodes = 1000
 
 

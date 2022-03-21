@@ -7,6 +7,7 @@ from DenseNet import dense_block
 import numpy as np
 import cv2
 from utils import imshow
+import matplotlib.pyplot as plt
 
 
 class A2CAgent:
@@ -15,7 +16,7 @@ class A2CAgent:
 
         # actor
         a = layers.Input(shape=input_shape)
-        x = dense_block(a, 0, num_layers=6, growth_rate=6)[0]
+        x = dense_block(a, input_shape[-1], num_layers=6, growth_rate=6, self_attention=True)[0]
         mean = layers.Conv2D(4, 3, activation="tanh", padding="same")(x) * settings.max_action
 
         self.actor = tf.keras.Model(inputs=a, outputs=mean)
@@ -41,11 +42,11 @@ class _Trajectory:
     def __init__(self, state_size):
         # Buffer initialization
         self.state_buffer = np.zeros(
-            (settings.Training.max_episode_length, *state_size), dtype=np.float32
+            (settings.Training.update_interval, *state_size), dtype=np.float32
         )
 
-        self.action_buffer = np.zeros((settings.Training.max_episode_length, *state_size), dtype=np.float32)
-        self.reward_buffer = np.zeros(settings.Training.max_episode_length, dtype=np.float32)
+        self.action_buffer = np.zeros((settings.Training.update_interval, *state_size), dtype=np.float32)
+        self.reward_buffer = np.zeros(settings.Training.update_interval, dtype=np.float32)
 
         self.count = 0
 
@@ -58,8 +59,9 @@ class _Trajectory:
     def end(self):
         gamma = .9
         reward = self.reward_buffer[-1] / (1 - gamma)
+        reward = self.reward_buffer[-1]
         for i in reversed(range(len(self.reward_buffer))):
-            reward = reward * gamma + self.reward_buffer[i]
+            reward = reward * gamma + self.reward_buffer[i] * (1 - gamma)
             self.reward_buffer[i] = reward
 
 
@@ -70,14 +72,15 @@ class A2CTrainer:
         self.agent = agent
         self.critic = tf.keras.models.clone_model(disc)
         self.disc = disc
-        self.a_opt = tf.keras.optimizers.Adam(learning_rate=settings.Training.actor_lr)
-        self.c_opt = tf.keras.optimizers.Adam(learning_rate=settings.Training.critic_lr)
+        self.a_opt = tf.keras.optimizers.RMSprop(learning_rate=settings.Training.actor_lr)
+        self.c_opt = tf.keras.optimizers.RMSprop(learning_rate=settings.Training.critic_lr)
 
     def _run_episode(self, pbar):
         state = tf.random.uniform([1, *self.input_shape], 0, 1)
         reward = None
         traj = _Trajectory(self.input_shape)
-        for _ in range(settings.Training.max_episode_length):
+
+        for step in range(settings.Training.max_episode_length):
             action, reward, next_state = self._step(state)
             traj.add_experience(state, action, reward)
 
@@ -89,17 +92,17 @@ class A2CTrainer:
             img = cv2.resize(img, (img.shape[0] * 5, img.shape[1] * 5), interpolation=cv2.INTER_NEAREST)
             imshow('image', img)
             cv2.waitKey(1)
-
-        traj.end()
+            if (step + 1) % settings.Training.update_interval == 0:
+                traj.end()
+                self._train_step(
+                    tf.convert_to_tensor(traj.state_buffer),
+                    tf.convert_to_tensor(traj.action_buffer),
+                    tf.convert_to_tensor(traj.reward_buffer))
+                traj = _Trajectory(self.input_shape)
 
         # only save good images
         if reward > .9:
             self.fake_buffer.add(state)
-
-        self._train_step(
-            tf.convert_to_tensor(traj.state_buffer),
-            tf.convert_to_tensor(traj.action_buffer),
-            tf.convert_to_tensor(traj.reward_buffer))
 
         return tf.math.sigmoid(reward)
 
@@ -140,11 +143,11 @@ class A2CTrainer:
         pbar = tqdm(total=settings.Training.max_episode_length, colour='green')
 
         mr = 0
+
         for e in range(settings.Training.num_episodes):
             pbar.reset()
             pbar.set_description(f"Episode {e+1}")
             r = self._run_episode(pbar)
-
             mr = mr * .8 + r * .2
             if mr > 0.99:
                 return

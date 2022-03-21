@@ -20,23 +20,31 @@ def main():
     input_shape = f.shape
     f = tf.expand_dims(f, 0)
 
-    agent = A2CAgent(input_shape)
+    agent = SACAgent(input_shape)
 
     discriminator = Discriminator(input_shape)
     discriminator.call(f)
 
     d_buf = DiscriminatorBuffer(10000, input_shape)
     d_trainer = DiscriminatorTrainer(d_buf, dataset, discriminator)
-    g_trainer = A2CTrainer(agent, discriminator, d_buf)
+    # while True:
+    #     d_trainer.train_disc(agent, 10000)
+    #     d_trainer.train_gen(agent, 10000)
 
-    for _ in tqdm(range(200), "Initializing Discriminator Buffer"):
+    g_trainer = SACTrainer(agent, discriminator, d_buf)
+
+    @tf.function
+    def _buf_init_step():
         img = tf.random.uniform((1, *input_shape), 0, 1)
 
         for _ in range(100):
             mean = agent.actor(img)
             action = agent.sample(mean, 1)
             img = agent.update_img(img, action)
-        d_buf.add(img)
+        return img
+
+    for _ in tqdm(range(200), "Initializing Discriminator Buffer"):
+        d_buf.add(_buf_init_step())
 
     while True:
         d_trainer.train(100)
