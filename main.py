@@ -31,7 +31,7 @@ def main():
     #     d_trainer.train_disc(agent, 10000)
     #     d_trainer.train_gen(agent, 10000)
 
-    g_trainer = SACTrainer(agent, discriminator, d_buf)
+    g_trainer = SACTrainer(agent, discriminator, data)
 
     @tf.function
     def _buf_init_step():
@@ -43,11 +43,10 @@ def main():
             img = agent.update_img(img, action)
         return img
 
-    for _ in tqdm(range(200), "Initializing Discriminator Buffer"):
-        d_buf.add(_buf_init_step())
-
     while True:
-        d_trainer.train(100)
+        for _ in tqdm(range(200), "Updating Discriminator Buffer"):
+            d_buf.add(_buf_init_step())
+        d_trainer.train(100, agent)
         g_trainer.run()
 
 

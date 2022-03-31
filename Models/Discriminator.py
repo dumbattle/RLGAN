@@ -59,6 +59,7 @@ class DiscriminatorTrainer:
         total_loss = real_loss + fake_loss
         return total_loss
 
+    @tf.function
     def _disc_train_step(self, real, fake):
         with tf.GradientTape() as tape:
             real_out = self.disc(real)
@@ -69,7 +70,7 @@ class DiscriminatorTrainer:
         self.optimizer.apply_gradients(zip(grads, self.disc.trainable_variables))
         return loss
 
-    def train(self, num_epochs):
+    def train(self, num_epochs, gen):
         for e in range(num_epochs):
             total_loss = 0
             num = 0
@@ -78,13 +79,16 @@ class DiscriminatorTrainer:
 
             for batch in pbar:
                 num += 1
-                fake = self.buffer.sample(settings.Discriminator.Training.batch_size)
+                half_batch = int(settings.Discriminator.Training.batch_size / 2)
+                fake_buf = self.buffer.sample(half_batch)
+                fake_gen = gen.generate(count=half_batch)
+                fake = tf.concat([fake_buf, fake_gen], 0)
                 loss = self._disc_train_step(batch, fake)
                 total_loss += tf.reduce_mean(loss)
                 pbar.set_postfix_str(f"loss: {total_loss / num}")
             pbar.close()
 
-            if total_loss / num < .01:
+            if total_loss / num < .001:
                 self.buffer.count = 0
                 return
 

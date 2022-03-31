@@ -18,12 +18,14 @@ def dense_block(inp, num_channels, num_layers=None, growth_rate=None, activation
     x = None
     for i in range(num_layers):
         # bottleneck
-        x = layers.BatchNormalization()(inp)
-        x = layers.Activation(activation)(x)
+        # x = layers.BatchNormalization()(inp)
+        x = layers.Activation(activation)(inp)
+
+        # x = layers.Activation(activation)(x)
         x = layers.Conv2D(4 * growth_rate, 1, use_bias=False)(x)
 
         # conv
-        x = layers.BatchNormalization()(x)
+        # x = layers.BatchNormalization()(x)
         x = layers.Activation(activation)(x)
         x = layers.Conv2D(growth_rate, 3, padding='same', use_bias=False)(x)
 
@@ -39,7 +41,7 @@ def dense_block(inp, num_channels, num_layers=None, growth_rate=None, activation
 def transition(x, num_channels):
     num_channels = int(num_channels * settings.DenseNet.reduction)
 
-    x = layers.BatchNormalization()(x)
+    # x = layers.BatchNormalization()(x)
     x = layers.Activation(settings.DenseNet.activation)(x)
 
     x = layers.Conv2D(settings.DenseNet.growth_rate, 3, padding='same', use_bias=False)(x)
@@ -56,7 +58,7 @@ def DenseNet(input_shape, pool=True):
     for b in range(settings.DenseNet.num_blocks):
         x, num_channels = dense_block(x, num_channels, self_attention=b == settings.DenseNet.num_blocks - 1)
         x, num_channels = transition(x, num_channels)
-    x = layers.BatchNormalization()(x)
+    # x = layers.BatchNormalization()(x)
     x = layers.Activation(settings.DenseNet.activation)(x)
 
     if pool:

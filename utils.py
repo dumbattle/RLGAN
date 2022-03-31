@@ -22,4 +22,6 @@ def imshow(title, img):
     bg = bg[:h, :w]
     # Blend, using result = alpha*overlay + (1-alpha)*background
     im = ((alpha[..., None] * im + (1.0-alpha[..., None]) * bg[..., None]) * 255).astype(np.uint8)
+
+    im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
     cv2.imshow(title, im)

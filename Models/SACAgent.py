@@ -28,6 +28,19 @@ class SACAgent:
         mean = self.actor(state)
         return mean
 
+    def generate(self, img=None, steps=None, count=1):
+        if img is None:
+            img = tf.random.uniform((count, *self.input_shape), 0, 1)
+        if steps is None:
+            steps = settings.Training.max_episode_length
+
+        for s in range(steps):
+            mean = self.call(img)
+            action = self.sample(mean, 1)
+            img = self.update_img(img, action)
+
+        return img
+
     @staticmethod
     def sample(m, sd):
         return tf.random.normal(m.shape, m, sd)
@@ -99,10 +112,9 @@ class _Buffer:
 
 
 class SACTrainer:
-    def __init__(self, agent, disc, disc_buffer):
+    def __init__(self, agent, disc, real):
         self.input_shape = agent.input_shape
         self.disc = disc
-        self.fake_buffer = disc_buffer
         self.buffer = _Buffer(agent.input_shape)
 
         self.actor = agent
@@ -111,11 +123,12 @@ class SACTrainer:
         self.value_net = tf.keras.models.clone_model(disc)
         self.target_value_net = tf.keras.models.clone_model(disc)
 
-        self.a_opt = tf.keras.optimizers.RMSprop(.0003)
-        self.c_opt = tf.keras.optimizers.RMSprop(.0003)
-        self.v_opt = tf.keras.optimizers.RMSprop(.0003)
+        self.a_opt = tf.keras.optimizers.RMSprop(.00001)
+        self.c_opt = tf.keras.optimizers.RMSprop(.00002)
+        self.v_opt = tf.keras.optimizers.RMSprop(.00002)
 
         self.run_count = 0
+        self.real = real
 
     def run(self):
         self.run_count += 1
@@ -127,7 +140,7 @@ class SACTrainer:
             r = self._run_episode(episode + 1)
 
             scores.append(np.asscalar(r.numpy()))
-            plt.plot([i+1 for i in range(len(scores))], scores)
+            plt.plot([i+1 for i in range(len(scores))], scores,)
             plt.title(f'Scores {self.run_count}')
             plt.savefig(f'plots/rewards_{self.run_count}.png')
 
@@ -136,7 +149,16 @@ class SACTrainer:
                 return
 
     def _run_episode(self, episode_num):
-        state = tf.random.uniform([1, *self.input_shape], 0, 1)
+        num_real = 8 - 1
+        random_samples = self.real[np.random.choice(self.real.shape[0], num_real)]
+        state = np.random.uniform(0, 1, [1 + num_real, *self.input_shape])
+
+        for i in range(num_real):
+            state[i + 1] = np.where(
+                np.random.uniform(0, 1, self.input_shape) < float(i) / num_real,
+                state[i+1],
+                random_samples[i]
+            )
         reward = None
 
         pbar = tqdm(
@@ -150,7 +172,9 @@ class SACTrainer:
             next_state = self.actor.update_img(state, action)
 
             reward = tf.squeeze(self.disc(next_state))
-            self.buffer.add(state, action, reward, next_state)
+
+            for s, a, r, n in zip(state, action, reward, next_state):
+                self.buffer.add(s, a, tf.math.tanh(r), n)
 
             state = next_state
             if self.buffer.count >= settings.Training.batch_size:
@@ -158,17 +182,54 @@ class SACTrainer:
                 self._train_step(actions, states, rewards, next_state)
 
             # display info
-            pbar.set_postfix_str(f"Reward: {reward}")
+            pbar.set_postfix_str(f"Reward: {reward[0].numpy(), np.mean(reward)}")
 
-            img = tf.squeeze(tf.clip_by_value(state, 0, 1)).numpy()
+            # Display all
+            pow2val = 1
+            pow2 = 0
+
+            while state.shape[0] > pow2val:
+                pow2val *= 2
+                pow2 += 1
+
+            img = None
+            row = None
+            row_count = 0
+
+            for i, im in enumerate(state):
+                im = tf.squeeze(tf.clip_by_value(im, 0, 1)).numpy()
+
+                if row is None:
+                    row = im
+                    row_count = 1
+                else:
+                    row = cv2.hconcat([row, im])
+                    row_count += 1
+
+                if row_count == pow2:
+                    if img is None:
+                        img = row
+                    else:
+                        img = cv2.vconcat([img, row])
+
+                    row_count = 0
+                    row = None
+            if row_count != 0:
+                im = np.zeros_like(tf.squeeze(state[0]))
+
+                while row_count < pow2:
+                    row = cv2.hconcat([row, im])
+                    row_count += 1
+                if img is None:
+                    img = row
+                else:
+                    img = cv2.vconcat([img, row])
+
             img = cv2.resize(img, (img.shape[0] * 5, img.shape[1] * 5), interpolation=cv2.INTER_NEAREST)
             imshow('image', img)
             cv2.waitKey(1)
-            if tf.math.sigmoid(reward) > .9:
-                self.fake_buffer.add(tf.clip_by_value(state, 0, 1))
         pbar.close()
-        self.fake_buffer.add(state)
-        return reward
+        return reward[0]
 
     @tf.function
     def _train_step(self, state, action, reward, next_state):

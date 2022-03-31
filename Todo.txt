@@ -1,10 +1,6 @@
-
-- Discriminator Training
-    a) Use generated images directly from agent
-    b) use some from buffer
-    c) ratio - 2 : 1 : 1 :: real : from generator : from buffer
-
 - Save model to continue training in different session
+
+
 
 - Mask agent action
     a) flat rate (ie. 0.8)
