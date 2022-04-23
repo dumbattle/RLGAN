@@ -5,4 +5,5 @@ from DiscreteAgent import *
 from DDPGAgent import *
 from SACAgent import *
 from A2CAgent import *
+from TD3 import *
 

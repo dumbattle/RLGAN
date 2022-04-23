@@ -123,9 +123,9 @@ class SACTrainer:
         self.value_net = tf.keras.models.clone_model(disc)
         self.target_value_net = tf.keras.models.clone_model(disc)
 
-        self.a_opt = tf.keras.optimizers.RMSprop(.00001)
-        self.c_opt = tf.keras.optimizers.RMSprop(.00002)
-        self.v_opt = tf.keras.optimizers.RMSprop(.00002)
+        self.a_opt = tf.keras.optimizers.RMSprop(.0001)
+        self.c_opt = tf.keras.optimizers.RMSprop(.0002)
+        self.v_opt = tf.keras.optimizers.RMSprop(.0002)
 
         self.run_count = 0
         self.real = real
@@ -135,16 +135,18 @@ class SACTrainer:
         self.buffer.clear()
         self.value_net.set_weights(self.disc.get_weights())
         self.target_value_net.set_weights(self.disc.get_weights())
-        scores = []
+        scores_1st = []
+        scores_avg = []
         for episode in range(settings.Training.num_episodes):
-            r = self._run_episode(episode + 1)
-
-            scores.append(np.asscalar(r.numpy()))
-            plt.plot([i+1 for i in range(len(scores))], scores,)
+            r1, r2 = self._run_episode(episode + 1)
+            scores_1st.append(np.asscalar(r1.numpy()))
+            scores_avg.append(np.asscalar(r2))
+            plt.plot([i+1 for i in range(len(scores_1st))], scores_1st, 'g')
+            plt.plot([i+1 for i in range(len(scores_avg))], scores_avg, 'b')
             plt.title(f'Scores {self.run_count}')
             plt.savefig(f'plots/rewards_{self.run_count}.png')
 
-            if tf.math.sigmoid(r)  > 0.99:
+            if tf.math.sigmoid(r1)  > 0.99:
                 plt.clf()
                 return
 
@@ -174,7 +176,7 @@ class SACTrainer:
             reward = tf.squeeze(self.disc(next_state))
 
             for s, a, r, n in zip(state, action, reward, next_state):
-                self.buffer.add(s, a, tf.math.tanh(r), n)
+                self.buffer.add(s, a, tf.minimum(r, 10.0), n)
 
             state = next_state
             if self.buffer.count >= settings.Training.batch_size:
@@ -229,7 +231,7 @@ class SACTrainer:
             imshow('image', img)
             cv2.waitKey(1)
         pbar.close()
-        return reward[0]
+        return reward[0], np.mean(reward)
 
     @tf.function
     def _train_step(self, state, action, reward, next_state):

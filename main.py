@@ -1,7 +1,4 @@
-import tensorflow as tf
-import numpy as np
 from Models import *
-from PIL import Image
 import settings
 from tqdm import tqdm
 
@@ -20,7 +17,7 @@ def main():
     input_shape = f.shape
     f = tf.expand_dims(f, 0)
 
-    agent = SACAgent(input_shape)
+    agent = TD3Agent(input_shape)
 
     discriminator = Discriminator(input_shape)
     discriminator.call(f)
@@ -31,7 +28,7 @@ def main():
     #     d_trainer.train_disc(agent, 10000)
     #     d_trainer.train_gen(agent, 10000)
 
-    g_trainer = SACTrainer(agent, discriminator, data)
+    g_trainer = TD3Trainer(agent, discriminator, data)
 
     @tf.function
     def _buf_init_step():

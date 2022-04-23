@@ -1,3 +1,25 @@
+class TD3:
+    max_action = 3
+    noise = .1
+
+    discount = .99
+    tau = .005
+
+    class Training:
+        color = 'blue'
+        batch_size = 16
+        buffer_size = 50000
+        max_episode_length = 150
+        num_episodes = 1000
+
+        actor_update_interval = 2
+
+
+class PixelAE:
+    palette_code_size = 8
+    palette_size = 16
+
+
 class DenseNet:
     num_blocks = 4
     self_attention = []
@@ -22,6 +44,7 @@ class A2C:
 
     class Training:
         update_interval = 32
+        num_samples_per_state = 1
         num_updates_per_episode = 6
         max_episode_length = update_interval * num_updates_per_episode
 
