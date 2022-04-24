@@ -168,19 +168,21 @@ class TD3Trainer:
         return reward[0], np.mean(reward)
 
     def _train_step(self, actions, states, rewards, next_state):
-        self._train_critic_step(actions, states, rewards, next_state)
+        # Once image is realistic enough, not need to keep rewarding agent
+        r = tf.minimum(rewards, tf.sigmoid(rewards))
+        self._train_critic_step(actions, states, r, next_state)
 
         if self.update_count % settings.Training.actor_update_interval == 0:
             self._train_actor_step(states)
 
     @tf.function
     def _next(self, state):
-        action = tf.clip_by_value(
-            self.agent.actor(state) + tf.random.normal(state.shape, 0, settings.noise),
-            -settings.max_action,
-            settings.max_action
-        )
-
+        # action = tf.clip_by_value(
+        #     self.agent.actor(state) + tf.random.normal(state.shape, 0, settings.noise),
+        #     -settings.max_action,
+        #     settings.max_action
+        # )
+        action = self.agent.actor(state)
         next_state = self.agent.update_img(state, action)
         reward = tf.squeeze(self.disc(next_state))
         return action, next_state, reward
