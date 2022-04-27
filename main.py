@@ -1,7 +1,7 @@
 from Models import *
 import settings
 from tqdm import tqdm
-
+import os
 
 def main():
     data = np.load(settings.dataset_path)
@@ -40,11 +40,36 @@ def main():
             img = agent.update_img(img, action)
         return img
 
+    epoch = 0
+    current_phase = 0
+
+    # load
+    d_trainer.load()
+    g_trainer.load()
+
+    if os.path.exists('saves/state.npz'):
+        with np.load('saves/state.npz') as f:
+            epoch = f['epoch']
+            current_phase = f['current_phase']
+
+    # train loop
     while True:
-        for _ in tqdm(range(200), "Updating Discriminator Buffer"):
-            d_buf.add(_buf_init_step())
-        d_trainer.train(100, agent)
-        g_trainer.run()
+        if current_phase == 0:
+            epoch += 1
+            current_phase = 1
+
+        elif current_phase == 1:
+            for _ in tqdm(range(200), "Updating Discriminator Buffer"):
+                d_buf.add(_buf_init_step())
+            d_trainer.train(100, agent)
+            d_trainer.save()
+            current_phase = 2
+
+        elif current_phase == 2:
+            g_trainer.run(epoch)
+            current_phase = 0
+
+        np.savez('saves/state', current_phase=current_phase, epoch=epoch)
 
 
 if __name__ == "__main__":

@@ -6,12 +6,13 @@ import settings
 from tqdm import tqdm
 import cv2
 from utils import imshow
+import os
 
 
 def Discriminator(input_shape):
     return Sequential([
         DenseNet(input_shape),
-        layers.Dense(64, activation='relu'),
+        layers.Dense(256, activation='relu'),
         layers.Dense(1),
     ])
 
@@ -39,8 +40,18 @@ class DiscriminatorBuffer:
 
         return tf.convert_to_tensor(self.images[batch_indices])
 
-    def clear(self):
-        self.count = 0
+    def save(self):
+        np.savez("saves/discriminator/buffer", images=self.images, count=self.count)
+
+    def load(self):
+        if not os.path.exists("saves/discriminator/buffer.npz"):
+            return
+
+        data = np.load("saves/discriminator/buffer.npz")
+        self.images = data['images']
+        self.count = data['count']
+
+        data.close()
 
 
 class DiscriminatorTrainer:
@@ -52,6 +63,31 @@ class DiscriminatorTrainer:
         self.buffer = train_buffer
         self.dataset = real_dataset
         self.disc = discriminator
+
+    def save(self):
+        self.buffer.save()
+
+        opt_weights = self.optimizer.get_weights()
+        np.savez("saves/discriminator/optimizer", *opt_weights)
+
+        self.disc.save_weights('saves/discriminator/model/model')
+
+    def load(self):
+        if not os.path.exists("saves/discriminator/optimizer.npz"):
+            return
+
+        # buffer
+        self.buffer.load()
+
+        # optimizer
+        opt_weights_data = np.load("saves/discriminator/optimizer.npz")
+        opt_weights = [opt_weights_data[x] for x in opt_weights_data.files]
+        self._disc_train_step(self.buffer.sample(2), self.buffer.sample(2))
+        self.optimizer.set_weights(opt_weights)
+        opt_weights_data.close()
+
+        # discriminator - must be after optimizer
+        self.disc.load_weights('saves/discriminator/model/model')
 
     def _discriminator_loss(self, real_output, fake_output):
         real_loss = tf.reduce_sum(self.cross_entropy(tf.ones_like(real_output), real_output))
@@ -89,7 +125,6 @@ class DiscriminatorTrainer:
             pbar.close()
 
             if total_loss / num < .001:
-                self.buffer.count = 0
                 return
 
     def train_disc(self, gen, num_epochs):
