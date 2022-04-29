@@ -2,7 +2,7 @@ class TD3:
     max_action = 3
     noise = .1
 
-    discount = .99
+    discount = .9
     tau = .005
 
     class Training:

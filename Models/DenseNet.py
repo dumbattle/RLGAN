@@ -44,7 +44,7 @@ def transition(x, num_channels):
     # x = layers.BatchNormalization()(x)
     x = layers.Activation(settings.DenseNet.activation)(x)
 
-    x = layers.Conv2D(settings.DenseNet.growth_rate, 3, padding='same', use_bias=False)(x)
+    # x = layers.Conv2D(settings.DenseNet.growth_rate, 3, padding='same', use_bias=False)(x)
     x = layers.Conv2D(num_channels, 1, use_bias=False)(x)
     x = layers.AveragePooling2D(2, strides=2)(x)
 

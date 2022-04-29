@@ -202,7 +202,7 @@ class DiscriminatorTrainer:
                 img, loss = train_step(img)
 
                 # update loss
-                total_loss = tf.reduce_mean(loss)
+                total_loss += tf.reduce_mean(loss)
 
                 # update pbar
                 pbar.set_postfix_str(f"loss: {total_loss / num}")
