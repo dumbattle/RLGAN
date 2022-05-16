@@ -22,11 +22,11 @@ def dense_block(inp, num_channels, num_layers=None, growth_rate=None, activation
         x = layers.Activation(activation)(inp)
 
         # x = layers.Activation(activation)(x)
-        x = layers.Conv2D(4 * growth_rate, 1, use_bias=False)(x)
+        # x = layers.Conv2D(4 * growth_rate, 1, use_bias=False)(x)
 
         # conv
         # x = layers.BatchNormalization()(x)
-        x = layers.Activation(activation)(x)
+        # x = layers.Activation(activation)(x)
         x = layers.Conv2D(growth_rate, 3, padding='same', use_bias=False)(x)
 
         # concat
@@ -56,7 +56,7 @@ def DenseNet(input_shape, pool=True):
     x = inp
     num_channels = input_shape[-1]
     for b in range(settings.DenseNet.num_blocks):
-        x, num_channels = dense_block(x, num_channels, self_attention=b == settings.DenseNet.num_blocks - 1)
+        x, num_channels = dense_block(x, num_channels, self_attention=b == settings.DenseNet.num_blocks - 2)
         x, num_channels = transition(x, num_channels)
     # x = layers.BatchNormalization()(x)
     x = layers.Activation(settings.DenseNet.activation)(x)

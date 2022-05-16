@@ -55,7 +55,7 @@ class DiscriminatorBuffer:
 
 
 class DiscriminatorTrainer:
-    cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
+    cross_entropy = tf.keras.losses.MeanSquaredError()
 
     def __init__(self, train_buffer, real_dataset, discriminator):
         self.optimizer = tf.keras.optimizers.RMSprop(learning_rate=0.0003)
@@ -82,7 +82,7 @@ class DiscriminatorTrainer:
         # optimizer
         opt_weights_data = np.load("saves/discriminator/optimizer.npz")
         opt_weights = [opt_weights_data[x] for x in opt_weights_data.files]
-        self._disc_train_step(self.buffer.sample(2), self.buffer.sample(2))
+        self._disc_train_step(self.buffer.sample(2), self.buffer.sample(1), self.buffer.sample(1))
         self.optimizer.set_weights(opt_weights)
         opt_weights_data.close()
 
@@ -96,7 +96,9 @@ class DiscriminatorTrainer:
         return total_loss
 
     @tf.function
-    def _disc_train_step(self, real, fake):
+    def _disc_train_step(self, real, fake_buf, fake_gen):
+        fake = tf.concat([fake_buf, fake_gen], 0)
+
         with tf.GradientTape() as tape:
             real_out = self.disc(real)
             fake_out = self.disc(fake)
@@ -116,10 +118,11 @@ class DiscriminatorTrainer:
             for batch in pbar:
                 num += 1
                 half_batch = int(settings.Discriminator.Training.batch_size / 2)
+
                 fake_buf = self.buffer.sample(half_batch)
                 fake_gen = gen.generate(count=half_batch)
-                fake = tf.concat([fake_buf, fake_gen], 0)
-                loss = self._disc_train_step(batch, fake)
+                loss = self._disc_train_step(batch, fake_buf, fake_gen)
+
                 total_loss += tf.reduce_mean(loss)
                 pbar.set_postfix_str(f"loss: {total_loss / num}")
             pbar.close()

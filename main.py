@@ -17,18 +17,17 @@ def main():
     input_shape = f.shape
     f = tf.expand_dims(f, 0)
 
-    agent = TD3Agent(input_shape)
-
     discriminator = Discriminator(input_shape)
     discriminator.call(f)
+
+    agent = TD3Agent(input_shape)
+    g_trainer = TD3Trainer(agent, discriminator, data)
 
     d_buf = DiscriminatorBuffer(10000, input_shape)
     d_trainer = DiscriminatorTrainer(d_buf, dataset, discriminator)
     # while True:
     #     d_trainer.train_disc(agent, 10000)
     #     d_trainer.train_gen(agent, 10000)
-
-    g_trainer = TD3Trainer(agent, discriminator, data)
 
     @tf.function
     def _buf_init_step():

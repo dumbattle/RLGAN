@@ -29,7 +29,7 @@ def imshow(title, img):
 
 
 def generate_noisy_input(src):
-    num_real = 8 - 1
+    num_real = 16 - 1
     random_samples = src[np.random.choice(src.shape[0], num_real)]
     state = np.random.uniform(0, 1, [1 + num_real, *src[0].shape]).astype("float32")
 

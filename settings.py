@@ -22,7 +22,7 @@ class PixelAE:
 
 class DenseNet:
     num_blocks = 4
-    self_attention = []
+    self_attention = [3]
     layers_per_block = 4
     growth_rate = 8
     reduction = .5
@@ -44,12 +44,12 @@ class A2C:
 
     class Training:
         update_interval = 32
-        num_samples_per_state = 1
+        num_samples_per_state = 8
         num_updates_per_episode = 6
         max_episode_length = update_interval * num_updates_per_episode
 
-        actor_lr = 1e-4
-        critic_lr = 1e-4
+        actor_lr = 3e-5
+        critic_lr = 3e-5
         num_episodes = 10000
         gamma = .9
 

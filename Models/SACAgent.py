@@ -35,11 +35,15 @@ class SACAgent:
             steps = settings.Training.max_episode_length
 
         for s in range(steps):
-            mean = self.call(img)
-            action = self.sample(mean, 1)
-            img = self.update_img(img, action)
+            img = self._generate_step(img)
 
         return img
+
+    @tf.function
+    def _generate_step(self, img):
+        mean = self.call(img)
+        action = self.sample(mean, 1)
+        return self.update_img(img, action)
 
     @staticmethod
     def sample(m, sd):
@@ -123,14 +127,14 @@ class SACTrainer:
         self.value_net = tf.keras.models.clone_model(disc)
         self.target_value_net = tf.keras.models.clone_model(disc)
 
-        self.a_opt = tf.keras.optimizers.RMSprop(.0001)
-        self.c_opt = tf.keras.optimizers.RMSprop(.0002)
-        self.v_opt = tf.keras.optimizers.RMSprop(.0002)
+        self.a_opt = tf.keras.optimizers.Adam(.0001)
+        self.c_opt = tf.keras.optimizers.Adam(.0002)
+        self.v_opt = tf.keras.optimizers.Adam(.0002)
 
         self.run_count = 0
         self.real = real
 
-    def run(self):
+    def run(self, epoch):
         self.run_count += 1
         self.buffer.clear()
         self.value_net.set_weights(self.disc.get_weights())
@@ -138,7 +142,7 @@ class SACTrainer:
         scores_1st = []
         scores_avg = []
         for episode in range(settings.Training.num_episodes):
-            r1, r2 = self._run_episode(episode + 1)
+            r1, r2 = self._run_episode(episode + 1, epoch)
             scores_1st.append(np.asscalar(r1.numpy()))
             scores_avg.append(np.asscalar(r2))
             plt.plot([i+1 for i in range(len(scores_1st))], scores_1st, 'g')
@@ -150,7 +154,7 @@ class SACTrainer:
                 plt.clf()
                 return
 
-    def _run_episode(self, episode_num):
+    def _run_episode(self, episode_num, epoch):
         num_real = 8 - 1
         random_samples = self.real[np.random.choice(self.real.shape[0], num_real)]
         state = np.random.uniform(0, 1, [1 + num_real, *self.input_shape])
@@ -165,7 +169,7 @@ class SACTrainer:
 
         pbar = tqdm(
             range(settings.Training.max_episode_length),
-            f"Episode {episode_num}",
+            f"Episode {epoch}.{episode_num}",
             colour=settings.Training.color)
 
         for _ in pbar:
@@ -235,6 +239,7 @@ class SACTrainer:
 
     @tf.function
     def _train_step(self, state, action, reward, next_state):
+        reward = tf.squeeze(reward)
         # value net Training
         with tf.GradientTape() as tape:
             value = tf.squeeze(self.value_net(state))
