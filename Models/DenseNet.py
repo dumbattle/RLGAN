@@ -3,6 +3,7 @@ from tensorflow.keras import Model, layers
 import tensorflow as tf
 import settings
 from Attention import ConvSelfAttn
+import tensorflow_addons as tfa
 
 
 def dense_block(inp, num_channels, num_layers=None, growth_rate=None, activation=None, self_attention=False):
@@ -17,35 +18,33 @@ def dense_block(inp, num_channels, num_layers=None, growth_rate=None, activation
 
     x = None
     for i in range(num_layers):
+        x = inp
         # bottleneck
-        # x = layers.BatchNormalization()(inp)
-        x = layers.Activation(activation)(inp)
-
+        # x = tfa.layers.InstanceNormalization(axis=-1)(x)
         # x = layers.Activation(activation)(x)
         # x = layers.Conv2D(4 * growth_rate, 1, use_bias=False)(x)
 
         # conv
-        # x = layers.BatchNormalization()(x)
-        # x = layers.Activation(activation)(x)
+        # x = tfa.layers.InstanceNormalization(axis=-1)(x)
+        x = layers.Activation(activation)(x)
         x = layers.Conv2D(growth_rate, 3, padding='same', use_bias=False)(x)
 
         # concat
         inp = layers.Concatenate()([inp, x])
         num_channels += growth_rate
     x = inp
-    if self_attention:
-        x = ConvSelfAttn(num_channels)(inp)
+    # if self_attention:
+    #     x = layers.Concatenate()([ConvSelfAttn(num_channels)(inp), x])
     return x, num_channels
 
 
 def transition(x, num_channels):
     num_channels = int(num_channels * settings.DenseNet.reduction)
 
-    # x = layers.BatchNormalization()(x)
+    x = tfa.layers.InstanceNormalization(axis=-1)(x)
     x = layers.Activation(settings.DenseNet.activation)(x)
-
-    # x = layers.Conv2D(settings.DenseNet.growth_rate, 3, padding='same', use_bias=False)(x)
     x = layers.Conv2D(num_channels, 1, use_bias=False)(x)
+
     x = layers.AveragePooling2D(2, strides=2)(x)
 
     return x, num_channels
@@ -58,7 +57,7 @@ def DenseNet(input_shape, pool=True):
     for b in range(settings.DenseNet.num_blocks):
         x, num_channels = dense_block(x, num_channels, self_attention=b == settings.DenseNet.num_blocks - 2)
         x, num_channels = transition(x, num_channels)
-    # x = layers.BatchNormalization()(x)
+    # x = tfa.layers.InstanceNormalization(axis=-1)(x)
     x = layers.Activation(settings.DenseNet.activation)(x)
 
     if pool:

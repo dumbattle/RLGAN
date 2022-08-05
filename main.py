@@ -3,8 +3,14 @@ import settings
 from tqdm import tqdm
 import os
 
+
 def main():
+    # (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
+    # data = x_train
+    # data = np.reshape(data, (-1, 28, 28, 1))
+
     data = np.load(settings.dataset_path)
+
     data = data.astype("float32")
     data /= 255
 
@@ -21,30 +27,26 @@ def main():
     discriminator.call(f)
 
     agent = TD3Agent(input_shape)
-    g_trainer = TD3Trainer(agent, discriminator, data)
-
     d_buf = DiscriminatorBuffer(10000, input_shape)
+
     d_trainer = DiscriminatorTrainer(d_buf, dataset, discriminator)
-    # while True:
-    #     d_trainer.train_disc(agent, 10000)
-    #     d_trainer.train_gen(agent, 10000)
+    d_trainer.load()
+
+    g_trainer = TD3Trainer(agent, discriminator, data)
+    g_trainer.load()
 
     @tf.function
     def _buf_init_step():
         img = tf.random.uniform((1, *input_shape), 0, 1)
 
         for _ in range(100):
-            mean = agent.actor(img)
+            mean = agent.actor(img, training=False)
             action = agent.sample(mean, 1)
             img = agent.update_img(img, action)
         return img
 
     epoch = 0
     current_phase = 0
-
-    # load
-    d_trainer.load()
-    g_trainer.load()
 
     if os.path.exists('saves/state.npz'):
         with np.load('saves/state.npz') as f:
@@ -60,14 +62,14 @@ def main():
         elif current_phase == 1:
             for _ in tqdm(range(200), "Updating Discriminator Buffer"):
                 d_buf.add(_buf_init_step())
-            d_trainer.train(100, agent)
-            d_trainer.save()
+            d_trainer.train(1000, agent)
             current_phase = 2
 
         elif current_phase == 2:
             g_trainer.run(epoch)
             current_phase = 0
-
+        if not os.path.exists('saves'):
+            os.mkdir('saves')
         np.savez('saves/state', current_phase=current_phase, epoch=epoch)
 
 

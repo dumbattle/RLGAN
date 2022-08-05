@@ -9,6 +9,7 @@ import cv2
 from utils import imshow
 import matplotlib.pyplot as plt
 
+import scipy.signal
 from utils import generate_noisy_input, display_images
 
 
@@ -66,22 +67,41 @@ class _Trajectory:
         )
 
         self.action_buffer = np.zeros((size, *state_size), dtype=np.float32)
+        self.advantage_buffer = np.zeros(size, dtype=np.float32)
         self.reward_buffer = np.zeros(size, dtype=np.float32)
+        self.return_buffer = np.zeros(size, dtype=np.float32)
+        self.value_buffer = np.zeros(size, dtype=np.float32)
+        self.log_prob_buffer = np.zeros(size, dtype=np.float32)
+        self.gamma = 0.99
+        self.lam = 0.95
 
         self.count = 0
 
-    def add_experience(self, state, action, reward):
+    def add_experience(self, state, action, reward, value, log_prob):
         self.state_buffer[self.count] = state
         self.action_buffer[self.count] = action
         self.reward_buffer[self.count] = reward
+        self.value_buffer[self.count] = value
+        self.log_prob_buffer[self.count] = log_prob
         self.count += 1
 
-    def end(self):
-        reward = self.reward_buffer[-1]
+    def end(self, last_value):
+        rewards = np.append(self.reward_buffer, last_value)
+        values = np.append(self.value_buffer, last_value)
 
-        for i in reversed(range(len(self.reward_buffer))):
-            reward = reward + self.reward_buffer[i] * settings.Training.gamma
-            self.reward_buffer[i] = reward
+        deltas = rewards[:-1] + self.gamma * values[1:] - values[:-1]
+
+        self.advantage_buffer = self.discounted_cumulative_sums(
+            deltas, self.gamma * self.lam
+        )
+        self.return_buffer = self.discounted_cumulative_sums(
+            rewards, self.gamma
+        )[:-1]
+
+    @staticmethod
+    def discounted_cumulative_sums(x, discount):
+        # Discounted cumulative sums of vectors for computing rewards-to-go and advantage estimates
+        return scipy.signal.lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]
 
 
 class A2CTrainer:
@@ -102,21 +122,23 @@ class A2CTrainer:
 
         for step in range(settings.Training.max_episode_length):
             # step
-            action, reward, next_state = self._step(state)
-            for s, a, r, traj in zip(state, action, reward, trajs):
-                traj.add_experience(s, a, r)
+            action, reward, next_state, value, log_prob = self._step(state)
+            for s, a, r, v, p, traj in zip(state, action, reward, value, log_prob, trajs):
+                traj.add_experience(s, a, r, v, p)
 
             state = next_state
 
             # train
             if (step + 1) % settings.Training.update_interval == 0:
                 for traj in trajs:
-                    traj.end()
+                    traj.end(v)
 
                 self._train_step(
-                    tf.convert_to_tensor(np.concatenate([t.state_buffer for t in trajs])),
-                    tf.convert_to_tensor(np.concatenate([t.action_buffer for t in trajs])),
-                    tf.convert_to_tensor(np.concatenate([t.reward_buffer for t in trajs])))
+                    tf.convert_to_tensor(np.concatenate([t.state_buffer for t in trajs]), dtype=tf.float32),
+                    tf.convert_to_tensor(np.concatenate([t.action_buffer for t in trajs]), dtype=tf.float32),
+                    tf.convert_to_tensor(np.concatenate([t.log_prob_buffer for t in trajs]), dtype=tf.float32),
+                    tf.convert_to_tensor(np.concatenate([t.advantage_buffer for t in trajs]), dtype=tf.float32),
+                    tf.convert_to_tensor(np.concatenate([t.return_buffer for t in trajs]), dtype=tf.float32))
 
                 trajs = [_Trajectory(self.input_shape) for _ in range(settings.Training.num_samples_per_state)]
 
@@ -133,32 +155,65 @@ class A2CTrainer:
         action = self.agent.sample(mean, 1)
         next_state = tf.clip_by_value(self.agent.update_img(state, action), 0, 1)
 
-        reward = tf.squeeze(self.disc(next_state))
-        return action, reward, next_state
+        reward = 1 - tf.abs(tf.squeeze(self.disc(next_state)) - 1)
+
+        log_prob = self.agent.log_normal_pdf(action, mean, 1.)
+        log_prob = tf.reduce_mean(log_prob, [-1, -2, -3])
+        critic = self.critic(state)
+        return action, reward, next_state, critic, log_prob
 
     @tf.function
-    def _train_step(self, states, actions, rewards):
-        rewards = tf.squeeze(rewards)
+    def _train_critic(self, states, rewards):
+        # train critic
+        with tf.GradientTape() as tape:
+            critic_s = tf.squeeze(self.critic(states))
+            adv = rewards - critic_s
+            critic_loss = tf.reduce_mean(tf.math.square(adv))
+        variables = self.critic.trainable_variables
+        grad = tape.gradient(critic_loss, variables)
+        self.c_opt.apply_gradients(zip(grad, self.critic.trainable_variables))
 
+    @tf.function
+    def _train_actor_step(self, states, actions, adv, log_probs_orig):
+        # train actor
         with tf.GradientTape() as tape:
             mean = self.agent.actor.call(states)
             log_probs = self.agent.log_normal_pdf(actions, mean, 1.)
             log_probs = tf.reduce_mean(log_probs, [-1, -2, -3])
+            ratio = tf.exp(log_probs - log_probs_orig)
 
-            critic_s = tf.squeeze(self.critic(states))
+            min_advantage = tf.where(
+                adv > 0,
+                (1 + 0.2) * adv,
+                (1 - 0.2) * adv,
+            )
 
-            adv = rewards - critic_s
+            actor_loss = -tf.reduce_mean(
+                tf.minimum(ratio * adv, min_advantage)
+            )
+        variables = self.agent.actor.trainable_variables
+        grad = tape.gradient(actor_loss, variables)
 
-            actor_loss = -tf.reduce_mean(log_probs * tf.stop_gradient(adv))
-            critic_loss = tf.reduce_mean(tf.math.square(adv))
-            loss = actor_loss + critic_loss
-        variables = self.agent.actor.trainable_variables + self.critic.trainable_variables
-        grad = tape.gradient(loss, variables)
+        self.a_opt.apply_gradients(zip(grad, self.agent.actor.trainable_variables))
 
-        self.a_opt.apply_gradients(
-            zip(grad[:len(self.agent.actor.trainable_variables)], self.agent.actor.trainable_variables))
-        self.c_opt.apply_gradients(
-            zip(grad[len(self.agent.actor.trainable_variables):], self.critic.trainable_variables))
+        log_probs = self.agent.log_normal_pdf(actions, mean, 1.)
+        log_probs = tf.reduce_mean(log_probs, [-1, -2, -3])
+
+        kl = tf.reduce_mean(
+            log_probs_orig
+            - log_probs
+        )
+
+        return kl
+
+    def _train_step(self, states, actions, log_probs, adv, returns):
+        for _ in range(80):
+            kl = self._train_actor_step(states, actions, adv, log_probs)
+            if kl > 1.5 * .01:
+                # Early Stopping
+                break
+        for _ in range(80):
+            self._train_critic(states, returns)
 
     def run(self, epoch):
         self.critic.set_weights(self.disc.get_weights())

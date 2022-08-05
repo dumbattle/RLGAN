@@ -4,6 +4,10 @@ import tensorflow as tf
 
 
 def imshow(title, img):
+    if img.shape[-1] == 1 or img.shape[-1] == 3:
+        cv2.imshow(title, img)
+        return
+
     im = img
     alpha = im[..., -1]
     im = np.delete(im, -1, -1)
@@ -29,16 +33,13 @@ def imshow(title, img):
 
 
 def generate_noisy_input(src):
-    num_real = 16 - 1
+    num_real = 8 - 1
     random_samples = src[np.random.choice(src.shape[0], num_real)]
     state = np.random.uniform(0, 1, [1 + num_real, *src[0].shape]).astype("float32")
 
     for i in range(num_real):
-        state[i + 1] = np.where(
-            np.random.uniform(0, 1, src[0].shape) < float(i) / num_real,
-            state[i + 1],
-            random_samples[i]
-        )
+        r = i / num_real
+        state[i + 1] = state[i + 1] * r + random_samples[i] * (1 - r)
     return state
 
 
@@ -82,7 +83,9 @@ def display_images(images):
             img = row
         else:
             img = cv2.vconcat([img, row])
-
     img = cv2.resize(img, (img.shape[0] * 5, img.shape[1] * 5), interpolation=cv2.INTER_NEAREST)
+
+    if len(img.shape) == 2:
+        img = np.reshape(img, (*img.shape, 1))
     imshow('image', img)
     cv2.waitKey(1)

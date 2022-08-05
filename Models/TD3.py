@@ -7,8 +7,25 @@ from tqdm import tqdm
 from settings import TD3 as settings
 import numpy as np
 from utils import generate_noisy_input, display_images
-from DenseNet import DenseNet, dense_block, transition
 import matplotlib.pyplot as plt
+from Discriminator import Discriminator
+import tensorflow_addons as tfa
+
+
+# learn encoding rather than hard code since shape and size are always constant
+class PositionalEncoding(tf.keras.layers.Layer):
+    def __init__(self):
+        super(PositionalEncoding, self).__init__()
+        self.w = None
+
+    def build(self, input_shape):
+        self.w = self.add_weight("pos embedding", shape=[1, *input_shape[1:]])
+
+    def call(self, x):
+        # broadcast
+        e = x + self.w - x
+
+        return tf.concat([x, e], -1)
 
 
 class TD3Agent:
@@ -16,13 +33,31 @@ class TD3Agent:
         self.input_shape = input_shape
 
         a = layers.Input(shape=input_shape)
-        x, y = dense_block(a, input_shape[-1], num_layers=6, growth_rate=6, self_attention=True)
-        # x = layers.Conv2D(32, 1, activation="relu")(x)
-        x, y = dense_block(x, y, num_layers=6, growth_rate=6, self_attention=False)
-        # x = layers.Conv2D(32, 1, activation="relu")(x)
-        # x = dense_block(x, input_shape[-1], num_layers=6, growth_rate=6, self_attention=False)[0]
+        x = a
+        x = PositionalEncoding()(x)
 
-        mean = layers.Conv2D(4, 3, activation="tanh", padding="same", use_bias=False)(x) * settings.max_action
+        # block 1
+        x = layers.Conv2D(64, 3, padding='same', use_bias=False)(x)
+        x = layers.Activation('relu')(x)
+        x = layers.Conv2D(64, 1, use_bias=False)(x)
+        x = tfa.layers.InstanceNormalization(axis=-1)(x)
+        x = layers.Activation('relu')(x)
+
+        # block 2
+        x = layers.Conv2D(128, 3, padding='same', use_bias=False)(x)
+        x = layers.Activation('relu')(x)
+        x = layers.Conv2D(128, 1, use_bias=False)(x)
+        x = tfa.layers.InstanceNormalization(axis=-1)(x)
+        x = layers.Activation('relu')(x)
+
+        # block 3
+        x = layers.Conv2D(256, 3, padding='same', use_bias=False)(x)
+        x = layers.Activation('relu')(x)
+        x = layers.Conv2D(256, 1, use_bias=False)(x)
+        x = tfa.layers.InstanceNormalization(axis=-1)(x)
+        x = layers.Activation('relu')(x)
+
+        mean = layers.Conv2D(input_shape[-1], 1, activation="tanh", padding="same", use_bias=False)(x) * settings.max_action
 
         self.actor = tf.keras.Model(inputs=a, outputs=mean)
 
@@ -30,6 +65,8 @@ class TD3Agent:
         self.critic_2 = _Critic(input_shape)
 
     def save(self):
+        if not os.path.exists('saves/TD3/model'):
+            os.makedirs('saves/TD3/model')
         self.actor.save_weights('saves/TD3/model/actor/model')
         self.critic_1.save_weights('saves/TD3/model/critic_1/model')
         self.critic_2.save_weights('saves/TD3/model/critic_2/model')
@@ -39,8 +76,8 @@ class TD3Agent:
         self.critic_1.load_weights('saves/TD3/model/critic_1/model')
         self.critic_2.load_weights('saves/TD3/model/critic_2/model')
 
-    def call(self, state):
-        return self.actor(state)
+    def call(self, state, training=True):
+        return self.actor(state, training)
 
     def generate(self, img=None, steps=None, count=1):
         if img is None:
@@ -55,7 +92,7 @@ class TD3Agent:
 
     @tf.function
     def generate_step(self, img):
-        action = self.call(img)
+        action = self.call(img, training=False)
         img = self.update_img(img, action)
         return img
 
@@ -72,15 +109,11 @@ class TD3Agent:
 class _Critic(tf.keras.Model):
     def __init__(self, input_shape):
         super(_Critic, self).__init__()
-        self.dn = DenseNet(input_shape)
-        self.fc1 = layers.Dense(256, activation='relu')
-        self.fc2 = layers.Dense(1)
+        self.dn = Discriminator(input_shape)
 
     def call(self, state, action):
         x = TD3Agent.update_img(state, action)
         x = self.dn(x)
-        x = self.fc1(x)
-        x = self.fc2(x)
         return x
 
 
@@ -94,6 +127,9 @@ class _Buffer:
         self.next_state_buffer = np.zeros((settings.Training.buffer_size, *input_shape), dtype=np.float32)
 
     def save(self):
+
+        if not os.path.exists('saves/TD3'):
+            os.makedirs('saves/TD3')
         np.savez("saves/TD3/buffer",
                  state_buffer=self.state_buffer,
                  action_buffer=self.action_buffer,
@@ -162,13 +198,15 @@ class TD3Trainer:
         self.agent = agent
         self.disc = disc
 
-        self.actor_optimizer = tf.keras.optimizers.Adam(.0001)
-        self.critic_optimizer = tf.keras.optimizers.Adam(.0001)
+        self.actor_optimizer = tf.keras.optimizers.Adam(.00001)
+        self.critic_optimizer = tf.keras.optimizers.Adam(.00001)
 
-        self.actor_target = tf.keras.models.clone_model(agent.actor)
-        self.critic_1_target = _Critic(agent.input_shape)
-        self.critic_2_target = _Critic(agent.input_shape)
+        a2 = TD3Agent(agent.input_shape)
+        self.actor_target = a2.actor
+        self.critic_1_target = a2.critic_1
+        self.critic_2_target = a2.critic_2
 
+        self.actor_target.set_weights(self.agent.actor.get_weights())
         self.critic_1_target.set_weights(self.agent.critic_1.get_weights())
         self.critic_2_target.set_weights(self.agent.critic_2.get_weights())
 
@@ -178,6 +216,10 @@ class TD3Trainer:
         self.episode = 0
 
     def save(self):
+        if not os.path.exists('saves/TD3/model'):
+            os.makedirs('saves/TD3/model')
+        if not os.path.exists('saves/TD3/optimizer'):
+            os.makedirs('saves/TD3/optimizer')
         np.savez("saves/TD3/other", plot_a=self.scores_1st, plot_b=self.scores_avg, count=self.episode)
         self.agent.save()
         self.buffer.save()
@@ -214,6 +256,8 @@ class TD3Trainer:
         self.actor_target.load_weights('saves/TD3/model/actor_target/model')
         self.critic_1_target.load_weights('saves/TD3/model/critic_1_target/model')
         self.critic_2_target.load_weights('saves/TD3/model/critic_2_target/model')
+        print(self.actor_optimizer.lr)
+        print(self.critic_optimizer.lr)
 
         others = np.load("saves/TD3/other.npz")
         self.scores_1st = list(others['plot_a'])
@@ -226,17 +270,20 @@ class TD3Trainer:
             r1, r2 = self._run_episode(epoch)
             self.scores_1st.append(np.asscalar(r1.numpy()))
             self.scores_avg.append(np.asscalar(r2))
-            plt.plot([i+1 for i in range(len(self.scores_1st))], self.scores_1st, 'g,')
-            plt.plot([i+1 for i in range(len(self.scores_avg))], self.scores_avg, 'b,')
+            plt.clf()
+
+            plt.plot([i+1 for i in range(len(self.scores_1st))], self.scores_1st, 'g' if self.episode < 10000 else 'g,')
+            plt.plot([i+1 for i in range(len(self.scores_avg))], self.scores_avg, 'b' if self.episode < 10000 else 'b,')
             plt.title(f'Scores {epoch}')
+            if not os.path.exists('plots'):
+                os.mkdir('plots')
             plt.savefig(f'plots/rewards_{epoch}.png')
             self.episode += 1
-            if r1  > 0.99:
+            if r1  > 0.95:
                 break
             if self.episode % 100 == 0:
                 self.save()
 
-        plt.clf()
         self.episode = 0
         self.buffer.clear()
         self.scores_1st = []
@@ -245,6 +292,7 @@ class TD3Trainer:
 
     def _run_episode(self, epoch):
         state = generate_noisy_input(self.real)
+        real = state[1].copy()
         reward = None
         total_c_loss = 0
         pbar = tqdm(
@@ -257,13 +305,15 @@ class TD3Trainer:
 
             for s, a, r, n in zip(state, action, reward, next_state):
                 self.buffer.add(s, a, r, n)
+            self.buffer.add(real, np.zeros_like(real), 1, real)
+
             state = next_state
 
             if self.buffer.count >= settings.Training.batch_size:
                 states, actions, rewards, next_state = self.buffer.sample()
                 total_c_loss += self._train_step(actions, states, rewards, next_state).numpy()
 
-            pbar.set_postfix_str(f"Reward: {reward[0].numpy(), np.mean(reward)} C-Loss: {total_c_loss / (step + 1)}")
+            pbar.set_postfix_str(f"Reward: {reward[0].numpy(), np.mean(reward), reward[1].numpy()} C-Loss: {total_c_loss / (step + 1)}")
             display_images(state)
         pbar.close()
 
@@ -278,7 +328,7 @@ class TD3Trainer:
 
         return c_loss
 
-    @tf.function
+    @tf.function(jit_compile=True)
     def _next(self, state):
         # action = tf.clip_by_value(
         #     self.agent.actor(state) + tf.random.normal(state.shape, 0, settings.noise),
@@ -287,20 +337,21 @@ class TD3Trainer:
         # )
         # no noise needed for exploration
         # exploration is accomplished by starting with real-ish images
-        action = self.agent.actor(state)
+        action = self.agent.actor(state, training=False)
+
         next_state = self.agent.update_img(state, action)
         next_state = tf.clip_by_value(next_state, 0, 1)  # no exploitation by saturating values
 
-        reward = 1 - tf.abs(tf.squeeze(self.disc(next_state)) - 1)
+        reward = 1 - tf.abs(tf.squeeze(self.disc(next_state, training=False)) - 1)
         return action, next_state, reward
 
-    @tf.function
+    @tf.function(jit_compile=True)
     def _train_critic_step(self, actions, states, rewards, next_state):
         # noise = tf.random.normal(actions.shape) * .1
-        next_action = tf.clip_by_value(self.actor_target(next_state), -settings.max_action, settings.max_action)
+        next_action = self.actor_target(next_state, training=False)
 
-        target_q1 = tf.squeeze(self.critic_1_target(next_state, next_action))
-        target_q2 = tf.squeeze(self.critic_2_target(next_state, next_action))
+        target_q1 = tf.squeeze(self.critic_1_target(next_state, next_action, training=False))
+        target_q2 = tf.squeeze(self.critic_2_target(next_state, next_action, training=False))
 
         rewards = tf.squeeze(rewards)
 
@@ -322,10 +373,10 @@ class TD3Trainer:
 
         return c1_loss
 
-    @tf.function
+    @tf.function(jit_compile=True)
     def _train_actor_step(self, states, critic_loss):
         with tf.GradientTape() as tape:
-            a_loss = -self.agent.critic_1(states, self.agent.actor(states))
+            a_loss = -self.agent.critic_1(states, self.agent.actor(states), training=False)
             a_loss = tf.reduce_mean(a_loss)
 
         grads = tape.gradient(a_loss, self.agent.actor.trainable_variables)

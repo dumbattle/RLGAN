@@ -1,0 +1,8 @@
+Activation:
+    Elu seems to be better than relu
+
+Optimizer:
+    Adam with lr = .0001 works
+
+Self-attention works
+Batch-norm not good (generator batch =/= discriminator batch)
