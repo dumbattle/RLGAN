@@ -131,7 +131,7 @@ class DiscriminatorTrainer:
         total_loss = real_loss + fake_loss
         return total_loss
 
-    @tf.function(jit_compile=True)
+    @tf.function()
     def _disc_train_step(self, real, fake_buf, fake_gen):
         fake = tf.concat([fake_buf, fake_gen], 0)
 

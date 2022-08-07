@@ -9,7 +9,7 @@ class TD3:
         color = 'blue'
         batch_size = 32
         buffer_size = 50000
-        max_episode_length = 150
+        max_episode_length = 300
         num_episodes = 100000
 
         actor_update_interval = 2

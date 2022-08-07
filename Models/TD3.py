@@ -103,6 +103,7 @@ class TD3Agent:
     @staticmethod
     def update_img(image, action):
         result = image + action / 255 / settings.max_action
+        result = tf.clip_by_value(result, 0, 1)
         return result
 
 
@@ -244,7 +245,7 @@ class TD3Trainer:
         c_opt_weights = [c_opt_weights_data[x] for x in c_opt_weights_data.files]
         states, actions, rewards, next_states = self.buffer.get_init_sample()
         self._train_critic_step(actions, states, rewards, next_states)
-        self._train_actor_step(states, 1)
+        self._train_actor_step(states)
 
         self.actor_optimizer.set_weights(a_opt_weights)
         self.critic_optimizer.set_weights(c_opt_weights)
@@ -324,11 +325,11 @@ class TD3Trainer:
 
         self.update_count += 1
         if self.update_count % settings.Training.actor_update_interval == 0:
-            self._train_actor_step(states, c_loss)
+            self._train_actor_step(states)
 
         return c_loss
 
-    @tf.function(jit_compile=True)
+    @tf.function()
     def _next(self, state):
         # action = tf.clip_by_value(
         #     self.agent.actor(state) + tf.random.normal(state.shape, 0, settings.noise),
@@ -340,12 +341,11 @@ class TD3Trainer:
         action = self.agent.actor(state, training=False)
 
         next_state = self.agent.update_img(state, action)
-        next_state = tf.clip_by_value(next_state, 0, 1)  # no exploitation by saturating values
 
         reward = 1 - tf.abs(tf.squeeze(self.disc(next_state, training=False)) - 1)
         return action, next_state, reward
 
-    @tf.function(jit_compile=True)
+    @tf.function()
     def _train_critic_step(self, actions, states, rewards, next_state):
         # noise = tf.random.normal(actions.shape) * .1
         next_action = self.actor_target(next_state, training=False)
@@ -373,8 +373,8 @@ class TD3Trainer:
 
         return c1_loss
 
-    @tf.function(jit_compile=True)
-    def _train_actor_step(self, states, critic_loss):
+    @tf.function()
+    def _train_actor_step(self, states):
         with tf.GradientTape() as tape:
             a_loss = -self.agent.critic_1(states, self.agent.actor(states), training=False)
             a_loss = tf.reduce_mean(a_loss)
