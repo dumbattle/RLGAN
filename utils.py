@@ -29,6 +29,7 @@ def imshow(title, img):
     im = ((alpha[..., None] * im + (1.0-alpha[..., None]) * bg[..., None]) * 255).astype(np.uint8)
 
     im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
+
     cv2.imshow(title, im)
 
 
@@ -48,8 +49,8 @@ def display_images(images):
     pow2 = 0
 
     while images.shape[0] > pow2val:
-        pow2val *= 2
         pow2 += 1
+        pow2val = pow2 * pow2
 
     img = None
     row = None
@@ -83,8 +84,7 @@ def display_images(images):
             img = row
         else:
             img = cv2.vconcat([img, row])
-    img = cv2.resize(img, (img.shape[0] * 5, img.shape[1] * 5), interpolation=cv2.INTER_NEAREST)
-
+    img = cv2.resize(img, (img.shape[1] * 5, img.shape[0] * 5), interpolation=cv2.INTER_NEAREST)
     if len(img.shape) == 2:
         img = np.reshape(img, (*img.shape, 1))
     imshow('image', img)

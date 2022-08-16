@@ -10,6 +10,7 @@ from utils import generate_noisy_input, display_images
 import matplotlib.pyplot as plt
 from Discriminator import Discriminator
 import tensorflow_addons as tfa
+from unet import UNet
 
 
 # learn encoding rather than hard code since shape and size are always constant
@@ -31,36 +32,14 @@ class PositionalEncoding(tf.keras.layers.Layer):
 class TD3Agent:
     def __init__(self, input_shape):
         self.input_shape = input_shape
-
+        self.pos_enc = PositionalEncoding()
         a = layers.Input(shape=input_shape)
         x = a
-        x = PositionalEncoding()(x)
-
-        # block 1
-        x = layers.Conv2D(64, 3, padding='same', use_bias=False)(x)
-        x = layers.Activation('relu')(x)
-        x = layers.Conv2D(64, 1, use_bias=False)(x)
-        x = tfa.layers.InstanceNormalization(axis=-1)(x)
-        x = layers.Activation('relu')(x)
-
-        # block 2
-        x = layers.Conv2D(128, 3, padding='same', use_bias=False)(x)
-        x = layers.Activation('relu')(x)
-        x = layers.Conv2D(128, 1, use_bias=False)(x)
-        x = tfa.layers.InstanceNormalization(axis=-1)(x)
-        x = layers.Activation('relu')(x)
-
-        # block 3
-        x = layers.Conv2D(256, 3, padding='same', use_bias=False)(x)
-        x = layers.Activation('relu')(x)
-        x = layers.Conv2D(256, 1, use_bias=False)(x)
-        x = tfa.layers.InstanceNormalization(axis=-1)(x)
-        x = layers.Activation('relu')(x)
-
+        x = self.pos_enc(x)
+        x = UNet(x)
         mean = layers.Conv2D(input_shape[-1], 1, activation="tanh", padding="same", use_bias=False)(x) * settings.max_action
 
         self.actor = tf.keras.Model(inputs=a, outputs=mean)
-
         self.critic_1 = _Critic(input_shape)
         self.critic_2 = _Critic(input_shape)
 
@@ -315,7 +294,9 @@ class TD3Trainer:
                 total_c_loss += self._train_step(actions, states, rewards, next_state).numpy()
 
             pbar.set_postfix_str(f"Reward: {reward[0].numpy(), np.mean(reward), reward[1].numpy()} C-Loss: {total_c_loss / (step + 1)}")
-            display_images(state)
+            im = state
+            im = tf.concat([im, self.agent.pos_enc.w], 0)
+            display_images(im)
         pbar.close()
 
         return reward[0], np.mean(reward)

@@ -4,6 +4,10 @@ from tqdm import tqdm
 import os
 
 
+def pad(x):
+    return tf.pad(x, [[0, 0], [0, 1], [11, 12], [0, 0]])
+
+
 def main():
     # (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
     # data = x_train
@@ -13,15 +17,15 @@ def main():
 
     data = data.astype("float32")
     data /= 255
+    data = pad(data).numpy()
 
     dataset = tf.data.Dataset\
         .from_tensor_slices(data)\
         .shuffle(data.shape[0])\
         .batch(settings.Discriminator.Training.batch_size)
 
-    f = data[0]
-    input_shape = f.shape
-    f = tf.expand_dims(f, 0)
+    for f in dataset.take(1):
+        input_shape = f.shape[1:]
 
     discriminator = Discriminator(input_shape)
     discriminator.call(f)
