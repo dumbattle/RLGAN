@@ -1,6 +1,7 @@
 data/
 plots/
 saves/
+generated/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

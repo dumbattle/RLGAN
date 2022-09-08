@@ -31,6 +31,7 @@ def imshow(title, img):
     im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
 
     cv2.imshow(title, im)
+    return im
 
 
 def generate_noisy_input(src):
@@ -87,5 +88,6 @@ def display_images(images):
     img = cv2.resize(img, (img.shape[1] * 5, img.shape[0] * 5), interpolation=cv2.INTER_NEAREST)
     if len(img.shape) == 2:
         img = np.reshape(img, (*img.shape, 1))
-    imshow('image', img)
+    im = imshow('image', img)
     cv2.waitKey(1)
+    return im

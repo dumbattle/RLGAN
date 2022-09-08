@@ -2,13 +2,13 @@ class TD3:
     max_action = 3
     noise = .1
 
-    discount = .9
+    discount = .99
     tau = .005
 
     class Training:
         color = 'blue'
         batch_size = 32
-        buffer_size = 50000
+        buffer_size = 30000
         max_episode_length = 300
         num_episodes = 100000
 
@@ -27,7 +27,7 @@ class DenseNet:
     growth_rate = 8
     reduction = .5
 
-    activation = 'relu'
+    activation = 'softplus'
 
 
 class Discriminator:
@@ -43,13 +43,12 @@ class A2C:
     max_action = 3
 
     class Training:
-        update_interval = 32
+        batchsize = 32
         num_samples_per_state = 8
-        num_updates_per_episode = 6
-        max_episode_length = update_interval * num_updates_per_episode
-
-        actor_lr = 3e-4
-        critic_lr = 3e-4
+        num_batches_per_episode = 8
+        max_episode_length = batchsize * num_batches_per_episode
+        actor_lr = 1e-4
+        critic_lr = 1e-4
         num_episodes = 10000
         gamma = .9
 

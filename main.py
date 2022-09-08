@@ -41,13 +41,7 @@ def main():
 
     @tf.function
     def _buf_init_step():
-        img = tf.random.uniform((1, *input_shape), 0, 1)
-
-        for _ in range(100):
-            mean = agent.actor(img, training=False)
-            action = agent.sample(mean, 1)
-            img = agent.update_img(img, action)
-        return img
+        return agent.generate()
 
     epoch = 0
     current_phase = 0

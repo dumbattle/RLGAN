@@ -9,7 +9,7 @@ import numpy as np
 from utils import generate_noisy_input, display_images
 import matplotlib.pyplot as plt
 from Discriminator import Discriminator
-import tensorflow_addons as tfa
+from PIL import Image
 from unet import UNet
 
 
@@ -37,7 +37,7 @@ class TD3Agent:
         x = a
         x = self.pos_enc(x)
         x = UNet(x)
-        mean = layers.Conv2D(input_shape[-1], 1, activation="tanh", padding="same", use_bias=False)(x) * settings.max_action
+        mean = layers.Conv2D(input_shape[-1], 1, activation="tanh", padding="same", use_bias=False)(x)
 
         self.actor = tf.keras.Model(inputs=a, outputs=mean)
         self.critic_1 = _Critic(input_shape)
@@ -76,13 +76,14 @@ class TD3Agent:
         return img
 
     @staticmethod
-    def sample(m, sd):
+    def sample(m):
         return m
 
     @staticmethod
-    def update_img(image, action):
-        result = image + action / 255 / settings.max_action
-        result = tf.clip_by_value(result, 0, 1)
+    def update_img(image, action, clip=True):
+        result = image + action * settings.max_action / 255.0
+        if clip:
+            result = tf.clip_by_value(result, 0, 1)
         return result
 
 
@@ -92,7 +93,7 @@ class _Critic(tf.keras.Model):
         self.dn = Discriminator(input_shape)
 
     def call(self, state, action):
-        x = TD3Agent.update_img(state, action)
+        x = TD3Agent.update_img(state, action, False)
         x = self.dn(x)
         return x
 
@@ -247,7 +248,7 @@ class TD3Trainer:
 
     def run(self, epoch):
         while self.episode < settings.Training.num_episodes:
-            r1, r2 = self._run_episode(epoch)
+            r1, r2, im = self._run_episode(epoch)
             self.scores_1st.append(np.asscalar(r1.numpy()))
             self.scores_avg.append(np.asscalar(r2))
             plt.clf()
@@ -258,10 +259,12 @@ class TD3Trainer:
             if not os.path.exists('plots'):
                 os.mkdir('plots')
             plt.savefig(f'plots/rewards_{epoch}.png')
-            self.episode += 1
+            plt.savefig(f'plots/_rewards_current.png')
             if r1  > 0.95:
                 break
+            self.episode += 1
             if self.episode % 100 == 0:
+                # self._update_targets(1)
                 self.save()
 
         self.episode = 0
@@ -270,22 +273,28 @@ class TD3Trainer:
         self.scores_avg = []
         self.save()
 
+        if not os.path.exists('generated/TD3'):
+            os.makedirs('generated/TD3')
+
+        im = Image.fromarray(im)
+        im.save(f"generated/TD3/{epoch}.png")
+
     def _run_episode(self, epoch):
         state = generate_noisy_input(self.real)
-        real = state[1].copy()
+        real = state[1]
         reward = None
         total_c_loss = 0
         pbar = tqdm(
             range(settings.Training.max_episode_length),
             f"Episode {epoch}.{self.episode}",
             colour=settings.Training.color)
+        self.buffer.add(real, np.zeros_like(real), 1, real)
 
         for step in pbar:
             action, next_state, reward = self._next(state)
 
             for s, a, r, n in zip(state, action, reward, next_state):
                 self.buffer.add(s, a, r, n)
-            self.buffer.add(real, np.zeros_like(real), 1, real)
 
             state = next_state
 
@@ -296,10 +305,10 @@ class TD3Trainer:
             pbar.set_postfix_str(f"Reward: {reward[0].numpy(), np.mean(reward), reward[1].numpy()} C-Loss: {total_c_loss / (step + 1)}")
             im = state
             im = tf.concat([im, self.agent.pos_enc.w], 0)
-            display_images(im)
+            im = display_images(im)
         pbar.close()
 
-        return reward[0], np.mean(reward)
+        return reward[0], np.mean(reward), im
 
     def _train_step(self, actions, states, rewards, next_state):
         c_loss = self._train_critic_step(actions, states, rewards, next_state)
@@ -312,24 +321,15 @@ class TD3Trainer:
 
     @tf.function()
     def _next(self, state):
-        # action = tf.clip_by_value(
-        #     self.agent.actor(state) + tf.random.normal(state.shape, 0, settings.noise),
-        #     -settings.max_action,
-        #     settings.max_action
-        # )
-        # no noise needed for exploration
-        # exploration is accomplished by starting with real-ish images
-        action = self.agent.actor(state, training=False)
-
+        action = self.agent.actor(state)  # + tf.random.normal(state.shape) * settings.noise
         next_state = self.agent.update_img(state, action)
-
         reward = 1 - tf.abs(tf.squeeze(self.disc(next_state, training=False)) - 1)
         return action, next_state, reward
 
     @tf.function()
     def _train_critic_step(self, actions, states, rewards, next_state):
-        # noise = tf.random.normal(actions.shape) * .1
-        next_action = self.actor_target(next_state, training=False)
+        noise = tf.random.normal(actions.shape) * settings.noise
+        next_action = self.actor_target(next_state, training=False) + noise
 
         target_q1 = tf.squeeze(self.critic_1_target(next_state, next_action, training=False))
         target_q2 = tf.squeeze(self.critic_2_target(next_state, next_action, training=False))
@@ -362,10 +362,12 @@ class TD3Trainer:
 
         grads = tape.gradient(a_loss, self.agent.actor.trainable_variables)
         self.actor_optimizer.apply_gradients(zip(grads, self.agent.actor.trainable_variables))
+        self._update_targets(settings.tau)
 
+    def _update_targets(self, tau):
         for a, b in zip(self.actor_target.weights, self.agent.actor.weights):
-            a.assign(b * settings.tau + a * (1 - settings.tau))
+            a.assign(b * tau + a * (1 - settings.tau))
         for a, b in zip(self.critic_1_target.weights, self.agent.critic_1.weights):
-            a.assign(b * settings.tau + a * (1 - settings.tau))
+            a.assign(b * tau + a * (1 - settings.tau))
         for a, b in zip(self.critic_2_target.weights, self.agent.critic_2.weights):
-            a.assign(b * settings.tau + a * (1 - settings.tau))
+            a.assign(b * tau + a * (1 - settings.tau))

@@ -6,15 +6,19 @@ def downsample(filters):
     initializer = tf.random_normal_initializer(0., 0.02)
 
     result = tf.keras.Sequential()
-    result.add(
-        tf.keras.layers.Conv2D(filters, 4, strides=2, padding='same',
-                               kernel_initializer=initializer, use_bias=False))
-    result.add(tfa.layers.InstanceNormalization(axis=-1))
-    result.add(tf.keras.layers.Activation('relu'))
 
-    result.add(tf.keras.layers.Conv2D(filters, 1, kernel_initializer=initializer, use_bias=False))
-    result.add(tfa.layers.InstanceNormalization(axis=-1))
+    result.add(
+        tf.keras.layers.Conv2D(filters, 4,
+                               strides=2,
+                               padding='same',
+                               kernel_initializer=initializer,
+                               use_bias=False))
     result.add(tf.keras.layers.Activation('relu'))
+    #
+    # result.add(tf.keras.layers.Conv2D(filters, 1, kernel_initializer=initializer, use_bias=False))
+    # result.add(tfa.layers.InstanceNormalization(axis=-1))
+    # result.add(tf.keras.layers.Activation('relu'))
+
     return result
 
 
@@ -22,38 +26,41 @@ def upsample(filters):
     initializer = tf.random_normal_initializer(0., 0.02)
 
     result = tf.keras.Sequential()
+
     result.add(
-        tf.keras.layers.Conv2DTranspose(filters, 4, strides=2,
+        tf.keras.layers.Conv2DTranspose(filters, 4,
+                                        strides=2,
                                         padding='same',
                                         kernel_initializer=initializer,
                                         use_bias=False))
-    result.add(tfa.layers.InstanceNormalization(axis=-1))
     result.add(tf.keras.layers.Activation('relu'))
 
-    result.add(tf.keras.layers.Conv2D(filters, 1, kernel_initializer=initializer, use_bias=False))
-    result.add(tfa.layers.InstanceNormalization(axis=-1))
-    result.add(tf.keras.layers.Activation('relu'))
+    # result.add(tf.keras.layers.Conv2D(filters, 1, kernel_initializer=initializer, use_bias=False))
+    # result.add(tfa.layers.InstanceNormalization(axis=-1))
+    # result.add(tf.keras.layers.Activation('relu'))
+
     return result
 
 
 def UNet(x):
     down_stack = [
-        downsample(32),
         downsample(64),
         downsample(128),
         downsample(256),
+        downsample(512),
     ]
 
     up_stack = [
+        # upsample(256),
+        upsample(512),
         upsample(256),
         upsample(128),
-        upsample(64),
-        upsample(32),
         # last upsample must be outside this list
     ]
 
+    # last upsample here
     last = tf.keras.Sequential()
-    last.add(upsample(32))  # last upsample here
+    last.add(upsample(64))
     last.add(tf.keras.layers.Conv2D(3, 1, padding='same', activation='tanh'))
 
     # Downsampling through the models
