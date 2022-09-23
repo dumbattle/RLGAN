@@ -13,37 +13,27 @@ def Discriminator(input_shape):
     inp = tf.keras.Input(shape=input_shape)
     # block 1
     x = layers.Conv2D(64, 3, padding='same', use_bias=False)(inp)
-    # x = layers.Activation('relu')(x)
-    # x = layers.Conv2D(64, 1, use_bias=False)(x)
     x = tfa.layers.InstanceNormalization(axis=-1)(x)
     x = layers.Activation('relu')(x)
     x = layers.AveragePooling2D(2, strides=2)(x)
     # block 2
     x = layers.Conv2D(128, 3, padding='same', use_bias=False)(x)
-    # x = layers.Activation('relu')(x)
-    # x = layers.Conv2D(128, 1, use_bias=False)(x)
     x = tfa.layers.InstanceNormalization(axis=-1)(x)
     x = layers.Activation('relu')(x)
     x = layers.AveragePooling2D(2, strides=2)(x)
     # block 3
     x = layers.Conv2D(256, 3, padding='same', use_bias=False)(x)
-    # x = layers.Activation('relu')(x)
-    # x = layers.Conv2D(256, 1, use_bias=False)(x)
     x = tfa.layers.InstanceNormalization(axis=-1)(x)
     x = layers.Activation('relu')(x)
     x = layers.AveragePooling2D(2, strides=2)(x)
     # block 4
     x = layers.Conv2D(512, 3, padding='same', use_bias=False)(x)
-    # x = layers.Activation('relu')(x)
-    # x = layers.Conv2D(512, 1, use_bias=False)(x)
     x = tfa.layers.InstanceNormalization(axis=-1)(x)
     x = layers.Activation('relu')(x)
     x = layers.AveragePooling2D(2, strides=2)(x)
     x = ConvSelfAttn(512)(x)
     # block 5
     x = layers.Conv2D(512, 3, padding='same', use_bias=False)(x)
-    # x = layers.Activation('relu')(x)
-    # x = layers.Conv2D(512, 1, use_bias=False)(x)
     x = tfa.layers.InstanceNormalization(axis=-1)(x)
     x = layers.Activation('relu')(x)
     # Dsicriminator head
@@ -51,10 +41,6 @@ def Discriminator(input_shape):
     x = layers.Dense(512, activation='relu')(x)
     x = layers.Dense(1)(x)
 
-    # x = DenseNet(input_shape, pool=False)(inp)
-    # x = ConvSelfAttn(x.shape[-1])(x)
-    # x = layers.Dense(1)(x)
-    # x = tf.reduce_mean(x, (1, 2, 3))
     return tf.keras.Model(inputs=inp, outputs=x)
 
 
@@ -81,16 +67,11 @@ class DiscriminatorBuffer:
 
         return tf.convert_to_tensor(self.images[batch_indices])
 
-    def save(self):
-        if not os.path.exists('saves/discriminator'):
-            os.makedirs('saves/discriminator')
-        np.savez("saves/discriminator/buffer", images=self.images, count=self.count)
+    def save(self, save_path):
+        np.savez(save_path, images=self.images, count=self.count)
 
-    def load(self):
-        if not os.path.exists("saves/discriminator/buffer.npz"):
-            return
-
-        data = np.load("saves/discriminator/buffer.npz")
+    def load(self, save_path):
+        data = np.load(save_path)
         self.images = data['images']
         self.count = data['count']
 
@@ -100,39 +81,41 @@ class DiscriminatorBuffer:
 class DiscriminatorTrainer:
     loss = tf.keras.losses.MeanSquaredError()
 
-    def __init__(self, train_buffer, real_dataset, discriminator):
+    def __init__(self, train_buffer, real_dataset, discriminator, save_dir):
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=0.0003)
         self.gen_optimizer = tf.keras.optimizers.Adam(learning_rate=0.0003)
         self.buffer = train_buffer
         self.dataset = real_dataset
         self.disc = discriminator
 
+        self.save_dir = save_dir
+
     def save(self):
-        if not os.path.exists('saves/discriminator/model'):
-            os.makedirs('saves/discriminator/model')
-        self.buffer.save()
+        if not os.path.exists(f'{self.save_dir}/discriminator'):
+            os.makedirs(f'{self.save_dir}/discriminator')
+        self.buffer.save(f"{self.save_dir}/discriminator/buffer")
 
         opt_weights = self.optimizer.get_weights()
-        np.savez("saves/discriminator/optimizer", *opt_weights)
+        np.savez(f'{self.save_dir}/discriminator/optimizer', *opt_weights)
 
-        self.disc.save_weights('saves/discriminator/model/model')
+        self.disc.save_weights(f'{self.save_dir}/discriminator/model/model')
 
     def load(self):
-        if not os.path.exists("saves/discriminator/optimizer.npz"):
+        if not os.path.exists(f'{self.save_dir}/discriminator/optimizer.npz'):
             return
 
         # buffer
-        self.buffer.load()
+        self.buffer.load(f"{self.save_dir}/discriminator/buffer.npz")
 
         # optimizer
-        opt_weights_data = np.load("saves/discriminator/optimizer.npz")
+        opt_weights_data = np.load(f'{self.save_dir}/discriminator/optimizer.npz')
         opt_weights = [opt_weights_data[x] for x in opt_weights_data.files]
         self._disc_train_step(self.buffer.sample(2), self.buffer.sample(1), self.buffer.sample(1))
         self.optimizer.set_weights(opt_weights)
         opt_weights_data.close()
 
         # discriminator - must be after optimizer
-        self.disc.load_weights('saves/discriminator/model/model')
+        self.disc.load_weights(f'{self.save_dir}/discriminator/model/model')
 
     def _discriminator_loss(self, real_output, fake_output):
         real_loss = tf.reduce_sum(self.loss(tf.ones_like(real_output), real_output))

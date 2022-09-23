@@ -13,7 +13,9 @@ def downsample(filters):
                                padding='same',
                                kernel_initializer=initializer,
                                use_bias=False))
+    result.add(tfa.layers.InstanceNormalization(axis=-1))
     result.add(tf.keras.layers.Activation('relu'))
+
     #
     # result.add(tf.keras.layers.Conv2D(filters, 1, kernel_initializer=initializer, use_bias=False))
     # result.add(tfa.layers.InstanceNormalization(axis=-1))
@@ -33,6 +35,7 @@ def upsample(filters):
                                         padding='same',
                                         kernel_initializer=initializer,
                                         use_bias=False))
+    result.add(tfa.layers.InstanceNormalization(axis=-1))
     result.add(tf.keras.layers.Activation('relu'))
 
     # result.add(tf.keras.layers.Conv2D(filters, 1, kernel_initializer=initializer, use_bias=False))
@@ -51,7 +54,6 @@ def UNet(x):
     ]
 
     up_stack = [
-        # upsample(256),
         upsample(512),
         upsample(256),
         upsample(128),
@@ -61,7 +63,7 @@ def UNet(x):
     # last upsample here
     last = tf.keras.Sequential()
     last.add(upsample(64))
-    last.add(tf.keras.layers.Conv2D(3, 1, padding='same', activation='tanh'))
+    # last.add(tf.keras.layers.Conv2D(3, 1, padding='same', activation='relu'))
 
     # Downsampling through the models
     skips = []

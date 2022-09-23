@@ -20,7 +20,7 @@ class PositionalEncoding(tf.keras.layers.Layer):
         self.w = None
 
     def build(self, input_shape):
-        self.w = self.add_weight("pos embedding", shape=[1, *input_shape[1:]])
+        self.w = self.add_weight("pos embedding", shape=[1, *input_shape[1:]], initializer=tf.keras.initializers.RandomUniform(0, 1))
 
     def call(self, x):
         # broadcast
@@ -43,17 +43,15 @@ class TD3Agent:
         self.critic_1 = _Critic(input_shape)
         self.critic_2 = _Critic(input_shape)
 
-    def save(self):
-        if not os.path.exists('saves/TD3/model'):
-            os.makedirs('saves/TD3/model')
-        self.actor.save_weights('saves/TD3/model/actor/model')
-        self.critic_1.save_weights('saves/TD3/model/critic_1/model')
-        self.critic_2.save_weights('saves/TD3/model/critic_2/model')
+    def save(self, save_dir):
+        self.actor.save_weights(f'{save_dir}/actor/model')
+        self.critic_1.save_weights(f'{save_dir}/critic_1/model')
+        self.critic_2.save_weights(f'{save_dir}/critic_2/model')
 
-    def load(self):
-        self.actor.load_weights('saves/TD3/model/actor/model')
-        self.critic_1.load_weights('saves/TD3/model/critic_1/model')
-        self.critic_2.load_weights('saves/TD3/model/critic_2/model')
+    def load(self, save_dir):
+        self.actor.load_weights(f'{save_dir}/actor/model')
+        self.critic_1.load_weights(f'{save_dir}/critic_1/model')
+        self.critic_2.load_weights(f'{save_dir}/critic_2/model')
 
     def call(self, state, training=True):
         return self.actor(state, training)
@@ -107,27 +105,21 @@ class _Buffer:
         self.reward_buffer = np.zeros(settings.Training.buffer_size, dtype=np.float32)
         self.next_state_buffer = np.zeros((settings.Training.buffer_size, *input_shape), dtype=np.float32)
 
-    def save(self):
-
-        if not os.path.exists('saves/TD3'):
-            os.makedirs('saves/TD3')
-        np.savez("saves/TD3/buffer",
+    def save(self, save_path):
+        np.savez(save_path,
                  state_buffer=self.state_buffer,
                  action_buffer=self.action_buffer,
                  reward_buffer=self.reward_buffer,
                  next_state_buffer=self.next_state_buffer,
                  count=self.count)
 
-    def load(self):
-        if not os.path.exists("saves/TD3/buffer.npz"):
-            return
-
+    def load(self, save_path):
         self.state_buffer = None
         self.action_buffer = None
         self.reward_buffer = None
         self.next_state_buffer = None
 
-        data = np.load("saves/TD3/buffer.npz")
+        data = np.load(save_path)
 
         self.state_buffer = data['state_buffer']
         self.action_buffer = data['action_buffer']
@@ -173,7 +165,7 @@ class _Buffer:
 
 
 class TD3Trainer:
-    def __init__(self, agent, disc, real):
+    def __init__(self, agent, disc, real, save_dir):
         self.buffer = _Buffer(agent.input_shape)
         self.real = real
         self.agent = agent
@@ -195,31 +187,32 @@ class TD3Trainer:
         self.scores_1st = []
         self.scores_avg = []
         self.episode = 0
+        self.save_dir = save_dir
 
     def save(self):
-        if not os.path.exists('saves/TD3/model'):
-            os.makedirs('saves/TD3/model')
-        if not os.path.exists('saves/TD3/optimizer'):
-            os.makedirs('saves/TD3/optimizer')
-        np.savez("saves/TD3/other", plot_a=self.scores_1st, plot_b=self.scores_avg, count=self.episode)
-        self.agent.save()
-        self.buffer.save()
-        self.actor_target.save_weights('saves/TD3/model/actor_target/model')
-        self.critic_1_target.save_weights('saves/TD3/model/critic_1_target/model')
-        self.critic_2_target.save_weights('saves/TD3/model/critic_2_target/model')
+        if not os.path.exists(f'{self.save_dir}/TD3'):
+            os.makedirs(f'{self.save_dir}/TD3')
+        if not os.path.exists(f'{self.save_dir}/TD3/optimizer'):
+            os.makedirs(f'{self.save_dir}/TD3/optimizer')
+        np.savez(f'{self.save_dir}/TD3/other', plot_a=self.scores_1st, plot_b=self.scores_avg, count=self.episode)
+        self.agent.save(f'{self.save_dir}/TD3/model')
+        self.buffer.save(f"{self.save_dir}/TD3/buffer")
+        self.actor_target.save_weights(f'{self.save_dir}/TD3/model/actor_target/model')
+        self.critic_1_target.save_weights(f'{self.save_dir}/TD3/model/critic_1_target/model')
+        self.critic_2_target.save_weights(f'{self.save_dir}/TD3/model/critic_2_target/model')
         a_opt_weights = self.actor_optimizer.get_weights()
         c_opt_weights = self.critic_optimizer.get_weights()
-        np.savez("saves/TD3/optimizer/actor", *a_opt_weights)
-        np.savez("saves/TD3/optimizer/critic", *c_opt_weights)
+        np.savez(f"{self.save_dir}/TD3/optimizer/actor", *a_opt_weights)
+        np.savez(f"{self.save_dir}/TD3/optimizer/critic", *c_opt_weights)
 
     def load(self):
-        if not os.path.exists('saves/TD3/optimizer/actor.npz'):
+        if not os.path.exists(f'{self.save_dir}/TD3/optimizer/actor.npz'):
             return
-        self.buffer.load()
+        self.buffer.load(f"{self.save_dir}/TD3/buffer.npz")
 
         # optimizers
-        a_opt_weights_data = np.load("saves/TD3/optimizer/actor.npz")
-        c_opt_weights_data = np.load("saves/TD3/optimizer/critic.npz")
+        a_opt_weights_data = np.load(f"{self.save_dir}/TD3/optimizer/actor.npz")
+        c_opt_weights_data = np.load(f"{self.save_dir}/TD3/optimizer/critic.npz")
 
         a_opt_weights = [a_opt_weights_data[x] for x in a_opt_weights_data.files]
         c_opt_weights = [c_opt_weights_data[x] for x in c_opt_weights_data.files]
@@ -233,14 +226,14 @@ class TD3Trainer:
         c_opt_weights_data.close()
 
         # models - after optimizers
-        self.agent.load()
-        self.actor_target.load_weights('saves/TD3/model/actor_target/model')
-        self.critic_1_target.load_weights('saves/TD3/model/critic_1_target/model')
-        self.critic_2_target.load_weights('saves/TD3/model/critic_2_target/model')
+        self.agent.load(f'{self.save_dir}/TD3/model')
+        self.actor_target.load_weights(f'{self.save_dir}/TD3/model/actor_target/model')
+        self.critic_1_target.load_weights(f'{self.save_dir}/TD3/model/critic_1_target/model')
+        self.critic_2_target.load_weights(f'{self.save_dir}/TD3/model/critic_2_target/model')
         print(self.actor_optimizer.lr)
         print(self.critic_optimizer.lr)
 
-        others = np.load("saves/TD3/other.npz")
+        others = np.load(f"{self.save_dir}/TD3/other.npz")
         self.scores_1st = list(others['plot_a'])
         self.scores_avg = list(others['plot_b'])
         self.episode = others['count']
@@ -256,10 +249,10 @@ class TD3Trainer:
             plt.plot([i+1 for i in range(len(self.scores_1st))], self.scores_1st, 'g' if self.episode < 10000 else 'g,')
             plt.plot([i+1 for i in range(len(self.scores_avg))], self.scores_avg, 'b' if self.episode < 10000 else 'b,')
             plt.title(f'Scores {epoch}')
-            if not os.path.exists('plots'):
-                os.mkdir('plots')
-            plt.savefig(f'plots/rewards_{epoch}.png')
-            plt.savefig(f'plots/_rewards_current.png')
+            if not os.path.exists(f'{self.save_dir}/plots'):
+                os.mkdir(f'{self.save_dir}/plots')
+            plt.savefig(f'{self.save_dir}/plots/rewards_{epoch}.png')
+            plt.savefig(f'{self.save_dir}/plots/_rewards_current.png')
             if r1  > 0.95:
                 break
             self.episode += 1
@@ -273,11 +266,11 @@ class TD3Trainer:
         self.scores_avg = []
         self.save()
 
-        if not os.path.exists('generated/TD3'):
-            os.makedirs('generated/TD3')
+        if not os.path.exists(f'{self.save_dir}/generated'):
+            os.makedirs(f'{self.save_dir}/generated')
 
         im = Image.fromarray(im)
-        im.save(f"generated/TD3/{epoch}.png")
+        im.save(f"{self.save_dir}/generated/{epoch}.png")
 
     def _run_episode(self, epoch):
         state = generate_noisy_input(self.real)
@@ -304,7 +297,7 @@ class TD3Trainer:
 
             pbar.set_postfix_str(f"Reward: {reward[0].numpy(), np.mean(reward), reward[1].numpy()} C-Loss: {total_c_loss / (step + 1)}")
             im = state
-            im = tf.concat([im, self.agent.pos_enc.w], 0)
+            # im = tf.concat([im, self.agent.pos_enc.w], 0)
             im = display_images(im)
         pbar.close()
 

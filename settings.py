@@ -9,7 +9,7 @@ class TD3:
         color = 'blue'
         batch_size = 32
         buffer_size = 30000
-        max_episode_length = 300
+        max_episode_length = 150
         num_episodes = 100000
 
         actor_update_interval = 2
@@ -45,10 +45,10 @@ class A2C:
     class Training:
         batchsize = 32
         num_samples_per_state = 8
-        num_batches_per_episode = 8
+        num_batches_per_episode = 1
         max_episode_length = batchsize * num_batches_per_episode
         actor_lr = 1e-4
-        critic_lr = 1e-4
+        critic_lr = 3e-4
         num_episodes = 10000
         gamma = .9
 
