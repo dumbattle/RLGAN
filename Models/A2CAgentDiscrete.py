@@ -2,7 +2,7 @@ import tensorflow as tf
 from tensorflow.keras import layers
 from tqdm import tqdm
 
-from settings import A2C as settings
+from settings import A2C_D as settings
 import numpy as np
 import matplotlib.pyplot as plt
 from unet import UNet
@@ -27,18 +27,18 @@ class PositionalEncoding(tf.keras.layers.Layer):
         return tf.concat([x, e], -1)
 
 
-class A2CAgent:
-    def __init__(self, input_shape, max_action, mask_prob):
+class A2CDAgent:
+    def __init__(self, input_shape):
         self.input_shape = input_shape
-        # self.pos_enc = PositionalEncoding()
+        self.pos_enc = PositionalEncoding()
         a = layers.Input(shape=input_shape)
         x = a
-        # x = self.pos_enc(x)
+        x = self.pos_enc(x)
         x = UNet(x)
-        mean = layers.Conv2D(input_shape[-1], 1, activation="tanh", padding="same", use_bias=False)(x) * max_action
+        x = layers.Conv2D(input_shape[-1] * 3, 1, padding="same", use_bias=False)(x)
+        x = tf.reshape(x, [-1, *x.shape[1:-1], input_shape[-1], 3])
 
-        self.actor = tf.keras.Model(inputs=a, outputs=mean)
-        self.mask_prob = mask_prob
+        self.actor = tf.keras.Model(inputs=a, outputs=x)
 
     def generate(self, img=None, steps=None, count=1, display=False):
         if img is None:
@@ -55,32 +55,41 @@ class A2CAgent:
 
     @tf.function
     def generate_step(self, img):
-        mean, mask = self.call(img, training=False)
+        mean = self.call(img, training=False)
         action = self.sample(mean)
-        img = self.update_img(img, action, mask)
+        img = self.update_img(img, action)
         return img
 
     def call(self, state, training=True):
-        mean = self.actor(state, training)
-
-        mask = tf.where(tf.random.uniform(self.input_shape[:2], 0., 1.) < self.mask_prob, 0., 1.)
-        mask = tf.expand_dims(mask, -1)
-        return mean, mask
+        logits = self.actor(state, training)
+        return logits
 
     def sample(self, m):
-        return tf.random.normal(m.shape, m)
+        shape = m.shape
+        x = tf.reshape(m, (-1, 3))
+        x = tf.random.categorical(x, 1)
+        x = tf.reshape(x, shape[:-1])
+        return x
 
     @staticmethod
-    def update_img(image, action, mask):
-        action *= mask
-        result = image + action / 255.0
+    def update_img(image, action):
+        action = tf.cast(action, tf.float32)
+        action -= 1
+        result = image + action / 100.0
         result = tf.clip_by_value(result, 0, 1)
         return result
 
     @staticmethod
-    def log_normal_pdf(sample, mean):
-        log2pi = tf.math.log(2. * np.pi)
-        return -.5 * ((sample - mean) ** 2. + log2pi)
+    def log_prob(sample, logits):
+        s = sample.shape
+        sample = tf.reshape(sample, (-1,))
+        logits = tf.reshape(logits, (-1, logits.shape[-1]))
+        probs = tf.math.softmax(logits)
+        sample = tf.one_hot(sample, 3)
+        x = probs * sample
+        x = tf.reduce_sum(x, -1)
+        x = tf.reshape(x, s)
+        return tf.math.log(x)
 
     def save(self, save_dir):
         self.actor.save_weights(f'{save_dir}/actor/model')
@@ -94,20 +103,17 @@ class _Trajectory:
         size = settings.Training.max_episode_length
         # Buffer initialization
         self.state_buffer = np.zeros((size, *state_size), dtype=np.float32)
-        self.action_buffer = np.zeros((size, *state_size), dtype=np.float32)
-        self.mask_buffer = np.zeros((size, *state_size), dtype=np.float32)
+        self.action_buffer = np.zeros((size, *state_size), dtype=np.int64)
         self.reward_buffer = np.zeros(size, dtype=np.float32)
 
         self.gamma = 0.99
 
         self.count = 0
 
-    def add_experience(self, state, action, reward, mask):
+    def add_experience(self, state, action, reward):
         self.state_buffer[self.count] = state
         self.action_buffer[self.count] = action
         self.reward_buffer[self.count] = reward
-        if mask is not None:
-            self.mask_buffer[self.count] = mask
         self.count += 1
 
     def end(self):
@@ -118,7 +124,7 @@ class _Trajectory:
             self.reward_buffer[i] = r
 
 
-class A2CTrainer:
+class A2CDTrainer:
     def __init__(self, agent, disc, real, save_dir):
         self.input_shape = agent.input_shape
         self.real = real
@@ -163,10 +169,9 @@ class A2CTrainer:
         c_opt_weights = [c_opt_weights_data[x] for x in c_opt_weights_data.files]
 
         states = tf.random.normal([2, *self.input_shape])
-        actions = tf.random.normal([2, *self.input_shape])
-        mask = tf.random.normal([2, 1, 1, 1])
+        actions = tf.random.uniform([2, *self.input_shape], 0, 3, dtype=tf.int64)
         rewards = tf.random.normal([2, 1])
-        ag, cg = self._train_step(states, actions, rewards, mask)
+        ag, cg = self._train_step(states, actions, rewards)
 
         self.a_opt.apply_gradients(zip(ag, self.agent.actor.trainable_variables))
         self.c_opt.apply_gradients(zip(cg, self.critic.trainable_variables))
@@ -192,13 +197,13 @@ class A2CTrainer:
         trajs = [_Trajectory(self.input_shape) for _ in range(settings.Training.num_samples_per_state)]
         for step in range(settings.Training.max_episode_length):
             # step
-            action, reward, next_state, mask = self._step(state)
-            for s, a, r, m, traj in zip(state, action, reward, mask, trajs):
-                traj.add_experience(s, a, r, m)
+            action, reward, next_state, rf = self._step(state)
+            for s, a, r, traj in zip(state, action, reward, trajs):
+                traj.add_experience(s, a, r)
             state = next_state
 
             # update displays
-            pbar.set_postfix_str(f"Reward: {reward[0].numpy(), np.mean(reward)}")
+            pbar.set_postfix_str(f"Reward: {rf[0].numpy(), np.mean(rf)}")
             pbar.update()
 
             im = state
@@ -215,9 +220,8 @@ class A2CTrainer:
             ind_end = ind_start + settings.Training.batchsize
             ag, cg = self._train_step(
                 tf.convert_to_tensor(np.concatenate([t.state_buffer[ind_start:ind_end] for t in trajs]), dtype=tf.float32),
-                tf.convert_to_tensor(np.concatenate([t.action_buffer[ind_start:ind_end] for t in trajs]), dtype=tf.float32),
-                tf.convert_to_tensor(np.concatenate([t.reward_buffer[ind_start:ind_end] for t in trajs]), dtype=tf.float32),
-                tf.convert_to_tensor(np.concatenate([t.mask_buffer[ind_start:ind_end] for t in trajs]), dtype=tf.float32)
+                tf.convert_to_tensor(np.concatenate([t.action_buffer[ind_start:ind_end] for t in trajs]), dtype=tf.int64),
+                tf.convert_to_tensor(np.concatenate([t.reward_buffer[ind_start:ind_end] for t in trajs]), dtype=tf.float32)
             )
 
             if actor_grads is None:
@@ -232,16 +236,18 @@ class A2CTrainer:
         self.c_opt.apply_gradients(zip(critic_grads, self.critic.trainable_variables))
         self.a_opt.apply_gradients(zip(actor_grads, self.agent.actor.trainable_variables))
 
-        return reward[0].numpy(), np.mean(reward), im
+        return rf[0].numpy(), np.mean(rf), im
 
     @tf.function
     def _step(self, state):
-        mean, mask = self.agent.call(state)
+        mean = self.agent.call(state)
         action = self.agent.sample(mean)
-        next_state = self.agent.update_img(state, action, mask)
+        next_state = self.agent.update_img(state, action)
 
-        reward = 1 - tf.abs(tf.squeeze(self.disc(next_state, training=False)) - 1)
-        return action, reward, next_state, mask
+        reward_s = 1 - tf.abs(tf.squeeze(self.disc(state, training=False)) - 1)
+        reward_n = 1 - tf.abs(tf.squeeze(self.disc(next_state, training=False)) - 1)
+        reward = reward_n - reward_s
+        return action, reward, next_state, reward_n
 
     @tf.function
     def _train_critic(self, states, rewards):
@@ -256,19 +262,18 @@ class A2CTrainer:
         return grad
 
     @tf.function
-    def _train_actor_step(self, states, actions, reward, mask):
+    def _train_actor_step(self, states, actions, reward):
         # train actor
         with tf.GradientTape() as tape:
-            mean = self.agent.actor.call(states)
-            log_probs = self.agent.log_normal_pdf(actions, mean)
-            log_probs *= mask
+            logits = self.agent.actor.call(states)
+            log_probs = self.agent.log_prob(actions, logits)
             log_probs = tf.reduce_sum(log_probs, [-1, -2, -3])
 
             values = tf.squeeze(self.critic(states))
             adv = reward - values
 
             actor_loss = -tf.reduce_mean(
-                log_probs * adv
+                log_probs * tf.stop_gradient(adv)
             )
         variables = self.agent.actor.trainable_variables
         grad = tape.gradient(actor_loss, variables)
@@ -276,8 +281,8 @@ class A2CTrainer:
         # self.a_opt.apply_gradients(zip(grad, variables))
         return grad
 
-    def _train_step(self, states, actions, reward, mask):
-        ag = self._train_actor_step(states, actions, reward, mask)
+    def _train_step(self, states, actions, reward):
+        ag = self._train_actor_step(states, actions, reward)
         cg = self._train_critic(states, reward)
         return ag, cg
 
@@ -307,7 +312,6 @@ class A2CTrainer:
                 break
             self.episode += 1
             if self.episode % 100 == 0:
-                # self._update_targets(1)
                 self.save()
 
         self.episode = 0
@@ -320,3 +324,7 @@ class A2CTrainer:
 
         im = Image.fromarray(im)
         im.save(f"{self.save_dir}/generated/{epoch}.png")
+
+
+if __name__ == '__main__':
+    print(A2CDAgent.log_prob(tf.constant([1, 2, 0]), tf.constant([[4., 6., 1.], [1., 2., 3], [4., 5., 6]])))

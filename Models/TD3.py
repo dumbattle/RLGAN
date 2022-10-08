@@ -56,7 +56,7 @@ class TD3Agent:
     def call(self, state, training=True):
         return self.actor(state, training)
 
-    def generate(self, img=None, steps=None, count=1):
+    def generate(self, img=None, steps=None, count=1, display=False):
         if img is None:
             img = tf.random.uniform((count, *self.input_shape), 0, 1)
         if steps is None:
@@ -64,6 +64,8 @@ class TD3Agent:
 
         for s in range(steps):
             img = self.generate_step(img)
+            if display:
+                display_images(img)
 
         return img
 
@@ -314,7 +316,7 @@ class TD3Trainer:
 
     @tf.function()
     def _next(self, state):
-        action = self.agent.actor(state)  # + tf.random.normal(state.shape) * settings.noise
+        action = self.agent.actor(state) + tf.random.normal(state.shape) * settings.noise
         next_state = self.agent.update_img(state, action)
         reward = 1 - tf.abs(tf.squeeze(self.disc(next_state, training=False)) - 1)
         return action, next_state, reward

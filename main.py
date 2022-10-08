@@ -8,6 +8,36 @@ def pad(x):
     return tf.pad(x, [[0, 0], [0, 1], [11, 12], [0, 0]])
 
 
+def load_A2CD_1():
+    dir = "saves/A2CD-3"
+
+    data = np.load(settings.dataset_path)
+
+    data = data.astype("float32")
+    data /= 255
+
+    data = pad(data).numpy()
+
+    dataset = tf.data.Dataset\
+        .from_tensor_slices(data)\
+        .shuffle(data.shape[0])\
+        .batch(settings.Discriminator.Training.batch_size)
+
+    for f in dataset.take(1):
+        input_shape = f.shape[1:]
+    discriminator = Discriminator(input_shape)
+
+    agent = A2CDAgent(input_shape)
+    d_buf = DiscriminatorBuffer(10000, input_shape)
+
+    d_trainer = DiscriminatorTrainer(d_buf, dataset, discriminator, dir)
+    d_trainer.load()
+
+    g_trainer = A2CDTrainer(agent, discriminator, data, dir)
+    g_trainer.load()
+    return discriminator, agent, d_trainer, g_trainer, d_buf, dir
+
+
 def load_A2C_1():
     data = np.load(settings.dataset_path)
 
@@ -54,7 +84,7 @@ def load_A2C_2():
         input_shape = f.shape[1:]
     discriminator = Discriminator(input_shape)
 
-    agent = A2CAgent(input_shape, 50, .9)
+    agent = A2CAgent(input_shape, 50, .99)
     d_buf = DiscriminatorBuffer(10000, input_shape)
 
     d_trainer = DiscriminatorTrainer(d_buf, dataset, discriminator, dir)
@@ -131,12 +161,19 @@ def run(agent, d_buf, g_trainer, d_trainer, save_dir):
         np.savez(f'{save_dir}/state', current_phase=current_phase, epoch=epoch)
 
 
+def demo(agent):
+    while True:
+        agent.generate(steps=500, count=9, display=True)
+
+
 def main():
-    # discriminator, agent, d_trainer, g_trainer, d_buf, save_dir = load_TD3_1()
+    discriminator, agent, d_trainer, g_trainer, d_buf, save_dir = load_TD3_1()
     # discriminator, agent, d_trainer, g_trainer, d_buf, save_dir = load_A2C_1()
-    discriminator, agent, d_trainer, g_trainer, d_buf, save_dir = load_A2C_2()
+    # discriminator, agent, d_trainer, g_trainer, d_buf, save_dir = load_A2C_2()
+    # discriminator, agent, d_trainer, g_trainer, d_buf, save_dir = load_A2CD_1()
 
     run(agent, d_buf, g_trainer, d_trainer, save_dir)
+    # demo(agent)
 
 
 if __name__ == "__main__":

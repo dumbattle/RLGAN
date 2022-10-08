@@ -34,8 +34,8 @@ def imshow(title, img):
     return im
 
 
-def generate_noisy_input(src):
-    num_real = 8 - 1
+def generate_noisy_input(src, num=8):
+    num_real = num - 1
     random_samples = src[np.random.choice(src.shape[0], num_real)]
     state = np.random.uniform(0, 1, [1 + num_real, *src[0].shape]).astype("float32")
 

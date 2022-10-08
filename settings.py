@@ -45,10 +45,21 @@ class A2C:
     class Training:
         batchsize = 32
         num_samples_per_state = 8
-        num_batches_per_episode = 1
+        num_batches_per_episode = 8
         max_episode_length = batchsize * num_batches_per_episode
-        actor_lr = 1e-4
-        critic_lr = 3e-4
+        actor_lr = 1e-5
+        critic_lr = 1e-5
+        num_episodes = 10000
+        gamma = .9
+
+class A2C_D:
+    class Training:
+        batchsize = 32
+        num_samples_per_state = 8
+        num_batches_per_episode = 8
+        max_episode_length = batchsize * num_batches_per_episode
+        actor_lr = 2e-4
+        critic_lr = 2e-4
         num_episodes = 10000
         gamma = .9
 
