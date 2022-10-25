@@ -9,7 +9,7 @@ import tensorflow_addons as tfa
 from Attention import ConvSelfAttn
 
 
-def Discriminator(input_shape):
+def Discriminator_V2(input_shape):
     inp = tf.keras.Input(shape=input_shape)
     # block 1
     x = layers.Conv2D(64, 3, padding='same', use_bias=False)(inp)
@@ -35,12 +35,80 @@ def Discriminator(input_shape):
     # block 5
     x = layers.Conv2D(512, 3, padding='same', use_bias=False)(x)
     x = tfa.layers.InstanceNormalization(axis=-1)(x)
+
     x = layers.Activation('relu')(x)
     # Dsicriminator head
     x = layers.GlobalAvgPool2D()(x)
     x = layers.Dense(512, activation='relu')(x)
     x = layers.Dense(1)(x)
 
+    x2 = layers.Conv2D(64, 3, padding='same', use_bias=False)(inp)
+    x2 = tfa.layers.InstanceNormalization(axis=-1)(x2)
+
+    x2 = layers.Activation('relu')(x2)
+
+    x2 = layers.Conv2D(1, 1, padding='same', use_bias=False)(x2)
+    x2 = tfa.layers.InstanceNormalization(axis=-1)(x2)
+
+    x2 = layers.Activation('relu')(x2)
+
+    x2 = tf.reduce_mean(x2, [-1, -2, -3])
+    x2 = tf.expand_dims(x2, -1)
+
+    return tf.keras.Model(inputs=inp, outputs=x + x2)
+
+
+def Discriminator(input_shape):
+    inp = tf.keras.Input(shape=input_shape)
+    # block 1
+    x = layers.Conv2D(64, 3, padding='same', use_bias=False)(inp)
+    x = tfa.layers.InstanceNormalization(axis=-1)(x)
+    x = layers.Activation('relu')(x)
+    x = layers.AveragePooling2D(2, strides=2)(x)
+    # block 2
+    x = layers.Conv2D(128, 3, padding='same', use_bias=False)(x)
+    x = tfa.layers.InstanceNormalization(axis=-1)(x)
+    x = layers.Activation('relu')(x)
+    x = layers.AveragePooling2D(2, strides=2)(x)
+    # x = ConvSelfAttn(128)(x)
+    # block 3
+    x = layers.Conv2D(256, 3, padding='same', use_bias=False)(x)
+    x = tfa.layers.InstanceNormalization(axis=-1)(x)
+    x = layers.Activation('relu')(x)
+    x = layers.AveragePooling2D(2, strides=2)(x)
+    # x = ConvSelfAttn(256)(x)
+    # block 4
+    x = layers.Conv2D(512, 3, padding='same', use_bias=False)(x)
+    x = tfa.layers.InstanceNormalization(axis=-1)(x)
+    x = layers.Activation('relu')(x)
+    x = layers.AveragePooling2D(2, strides=2)(x)
+    x = ConvSelfAttn(512)(x)
+    # block 5
+    x = layers.Conv2D(512, 3, padding='same', use_bias=False)(x)
+    x = tfa.layers.InstanceNormalization(axis=-1)(x)
+    x = layers.Activation('relu')(x)
+    # Dsicriminator head
+    x = layers.GlobalAvgPool2D()(x)
+    x = layers.Dense(512, activation='relu')(x)
+    x = layers.Dense(1)(x)
+
+    return tf.keras.Model(inputs=inp, outputs=x)
+
+
+def DiscriminatorSN(input_shape):
+    inp = tf.keras.Input(shape=input_shape)
+    x = tfa.layers.SpectralNormalization(layers.Conv2D(64, 4, strides=(2, 2), padding='same', use_bias=False))(inp)
+    x = layers.Activation('relu')(x)
+    x = tfa.layers.SpectralNormalization(layers.Conv2D(128, 4, strides=(2, 2), padding='same', use_bias=False))(x)
+    x = layers.Activation('relu')(x)
+    x = tfa.layers.SpectralNormalization(layers.Conv2D(256, 4, strides=(2, 2), padding='same', use_bias=False))(x)
+    x = layers.Activation('relu')(x)
+    x = tfa.layers.SpectralNormalization(layers.Conv2D(512, 4, strides=(2, 2), padding='same', use_bias=False))(x)
+    x = layers.Activation('relu')(x)
+    x = tfa.layers.SpectralNormalization(layers.Conv2D(512, 4, strides=(2, 2), padding='same', use_bias=False))(x)
+    x = layers.Activation('relu')(x)
+    x = layers.GlobalAvgPool2D()(x)
+    x = tfa.layers.SpectralNormalization(layers.Dense(1))(x)
     return tf.keras.Model(inputs=inp, outputs=x)
 
 
@@ -110,28 +178,40 @@ class DiscriminatorTrainer:
         # optimizer
         opt_weights_data = np.load(f'{self.save_dir}/discriminator/optimizer.npz')
         opt_weights = [opt_weights_data[x] for x in opt_weights_data.files]
-        self._disc_train_step(self.buffer.sample(2), self.buffer.sample(1), self.buffer.sample(1))
+        self._disc_train_step(self.buffer.sample(settings.Discriminator.Training.batch_size), self.buffer.sample(settings.Discriminator.Training.batch_size//2), self.buffer.sample(settings.Discriminator.Training.batch_size//2))
         self.optimizer.set_weights(opt_weights)
         opt_weights_data.close()
 
         # discriminator - must be after optimizer
         self.disc.load_weights(f'{self.save_dir}/discriminator/model/model')
 
-    def _discriminator_loss(self, real_output, fake_output):
-        real_loss = tf.reduce_sum(self.loss(tf.ones_like(real_output), real_output))
+    def _discriminator_loss(self, real_real_output, real_noise_output, real_noise_labels, fake_output):
+        real_noise_output = tf.squeeze(real_noise_output)
+        real_noise_labels = tf.squeeze(real_noise_labels)
+        real_real_loss = tf.reduce_sum(self.loss(tf.ones_like(real_real_output), real_real_output))
+        real_noise_loss = tf.reduce_sum(self.loss(real_noise_labels, real_noise_output))
         fake_loss = tf.reduce_sum(self.loss(tf.zeros_like(fake_output), fake_output))
-        total_loss = real_loss + fake_loss
+        total_loss = real_noise_loss + fake_loss + real_real_loss
         return total_loss
 
     @tf.function()
     def _disc_train_step(self, real, fake_buf, fake_gen):
         fake = tf.concat([fake_buf, fake_gen], 0)
 
+        # split real in 2
+        rr = real[:real.shape[0] // 2]
+        rn = real[real.shape[0] // 2:]
+
+        # add some noise to half of real, score = noise level
+        n = tf.random.uniform([rr.shape[0], 1, 1, 1], 0, 1)
+        rn = rn * n + tf.random.normal(rn.shape, 0, 1) * (1 - n)
+
         with tf.GradientTape() as tape:
-            real_out = self.disc(real, training=True)
+            real_real_out = self.disc(rr, training=True)
+            real_noise_out = self.disc(rn, training=True)
             fake_out = self.disc(fake, training=True)
 
-            loss = self._discriminator_loss(real_out, fake_out)
+            loss = self._discriminator_loss(real_real_out, real_noise_out, n, fake_out)
 
         grads = tape.gradient(loss, self.disc.trainable_variables)
         self.optimizer.apply_gradients(zip(grads, self.disc.trainable_variables))
@@ -143,7 +223,6 @@ class DiscriminatorTrainer:
             num = 0
 
             pbar = tqdm(self.dataset, f"Epoch {e}")
-
             for batch in pbar:
                 num += 1
                 half_batch = int(settings.Discriminator.Training.batch_size / 2)
@@ -153,7 +232,14 @@ class DiscriminatorTrainer:
                 loss = self._disc_train_step(batch, fake_buf, fake_gen)
 
                 total_loss += loss.numpy()
+
                 pbar.set_postfix_str(f"loss: {total_loss / num}")
+                if num % 64 == 0:
+                    if total_loss / num < .001:
+                        break
+                    num = 0
+                    total_loss = 0
+
             pbar.close()
 
             if total_loss / num < .001:

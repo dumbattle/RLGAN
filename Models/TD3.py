@@ -8,7 +8,7 @@ from settings import TD3 as settings
 import numpy as np
 from utils import generate_noisy_input, display_images
 import matplotlib.pyplot as plt
-from Discriminator import Discriminator
+from Discriminator import Discriminator, DiscriminatorSN, Discriminator_V2
 from PIL import Image
 from unet import UNet
 
@@ -20,28 +20,30 @@ class PositionalEncoding(tf.keras.layers.Layer):
         self.w = None
 
     def build(self, input_shape):
-        self.w = self.add_weight("pos embedding", shape=[1, *input_shape[1:]], initializer=tf.keras.initializers.RandomUniform(0, 1))
+        self.w = self.add_weight("pos embedding", shape=[1, *input_shape[1:]], initializer=tf.keras.initializers.RandomNormal())
 
     def call(self, x):
         # broadcast
         e = x + self.w - x
-
         return tf.concat([x, e], -1)
 
 
 class TD3Agent:
-    def __init__(self, input_shape):
+    def __init__(self, input_shape, spectral_norm=False, v2=False):
         self.input_shape = input_shape
-        self.pos_enc = PositionalEncoding()
+        self.spectral_norm = spectral_norm
+        self.v2 = v2
         a = layers.Input(shape=input_shape)
         x = a
-        x = self.pos_enc(x)
+        x = PositionalEncoding()(x)
+
         x = UNet(x)
+
         mean = layers.Conv2D(input_shape[-1], 1, activation="tanh", padding="same", use_bias=False)(x)
 
         self.actor = tf.keras.Model(inputs=a, outputs=mean)
-        self.critic_1 = _Critic(input_shape)
-        self.critic_2 = _Critic(input_shape)
+        self.critic_1 = _Critic(input_shape, spectral_norm, v2)
+        self.critic_2 = _Critic(input_shape, spectral_norm, v2)
 
     def save(self, save_dir):
         self.actor.save_weights(f'{save_dir}/actor/model')
@@ -88,12 +90,22 @@ class TD3Agent:
 
 
 class _Critic(tf.keras.Model):
-    def __init__(self, input_shape):
+    def __init__(self, input_shape, spectral_norm=False, v2=False):
         super(_Critic, self).__init__()
-        self.dn = Discriminator(input_shape)
+        # self.dn = Discriminator([*input_shape[:-1], input_shape[-1]*2])
+        if spectral_norm:
+            self.dn = DiscriminatorSN(input_shape)
+        elif v2:
+            self.dn = Discriminator_V2(input_shape)
+        else:
+            self.dn = Discriminator(input_shape)
 
-    def call(self, state, action):
-        x = TD3Agent.update_img(state, action, False)
+    def call(self, state, action, delta_score):
+        if delta_score:
+            next = TD3Agent.update_img(state, action, False)
+            x = tf.concat([state, next], -1)
+        else:
+            x = TD3Agent.update_img(state, action, False)
         x = self.dn(x)
         return x
 
@@ -167,16 +179,16 @@ class _Buffer:
 
 
 class TD3Trainer:
-    def __init__(self, agent, disc, real, save_dir):
+    def __init__(self, agent, disc, real, save_dir, delta_score=False):
         self.buffer = _Buffer(agent.input_shape)
         self.real = real
         self.agent = agent
         self.disc = disc
-
+        self.delta_score = delta_score
         self.actor_optimizer = tf.keras.optimizers.Adam(.00001)
         self.critic_optimizer = tf.keras.optimizers.Adam(.00001)
 
-        a2 = TD3Agent(agent.input_shape)
+        a2 = TD3Agent(agent.input_shape, agent.spectral_norm, agent.v2)
         self.actor_target = a2.actor
         self.critic_1_target = a2.critic_1
         self.critic_2_target = a2.critic_2
@@ -232,8 +244,8 @@ class TD3Trainer:
         self.actor_target.load_weights(f'{self.save_dir}/TD3/model/actor_target/model')
         self.critic_1_target.load_weights(f'{self.save_dir}/TD3/model/critic_1_target/model')
         self.critic_2_target.load_weights(f'{self.save_dir}/TD3/model/critic_2_target/model')
-        print(self.actor_optimizer.lr)
-        print(self.critic_optimizer.lr)
+        print(self.actor_optimizer.beta_1)
+        print(self.critic_optimizer.beta_1)
 
         others = np.load(f"{self.save_dir}/TD3/other.npz")
         self.scores_1st = list(others['plot_a'])
@@ -242,6 +254,9 @@ class TD3Trainer:
         others.close()
 
     def run(self, epoch):
+        if self.episode == 0:
+            self._update_targets(1)
+        im = None
         while self.episode < settings.Training.num_episodes:
             r1, r2, im = self._run_episode(epoch)
             self.scores_1st.append(np.asscalar(r1.numpy()))
@@ -259,7 +274,6 @@ class TD3Trainer:
                 break
             self.episode += 1
             if self.episode % 100 == 0:
-                # self._update_targets(1)
                 self.save()
 
         self.episode = 0
@@ -270,7 +284,6 @@ class TD3Trainer:
 
         if not os.path.exists(f'{self.save_dir}/generated'):
             os.makedirs(f'{self.save_dir}/generated')
-
         im = Image.fromarray(im)
         im.save(f"{self.save_dir}/generated/{epoch}.png")
 
@@ -278,65 +291,67 @@ class TD3Trainer:
         state = generate_noisy_input(self.real)
         real = state[1]
         reward = None
-        total_c_loss = 0
         pbar = tqdm(
             range(settings.Training.max_episode_length),
             f"Episode {epoch}.{self.episode}",
             colour=settings.Training.color)
-        self.buffer.add(real, np.zeros_like(real), 1, real)
 
+        if not self.delta_score:
+            self.buffer.add(real, np.zeros_like(real), 1, real)
         for step in pbar:
-            action, next_state, reward = self._next(state)
-
-            for s, a, r, n in zip(state, action, reward, next_state):
+            action, next_state, reward, delta = self._next(state)
+            rr = delta if self.delta_score else reward
+            for s, a, r, n in zip(state, action, rr, next_state):
                 self.buffer.add(s, a, r, n)
 
             state = next_state
 
             if self.buffer.count >= settings.Training.batch_size:
                 states, actions, rewards, next_state = self.buffer.sample()
-                total_c_loss += self._train_step(actions, states, rewards, next_state).numpy()
+                self._train_step(actions, states, rewards, next_state)
 
-            pbar.set_postfix_str(f"Reward: {reward[0].numpy(), np.mean(reward), reward[1].numpy()} C-Loss: {total_c_loss / (step + 1)}")
+            pbar.set_postfix_str(f"Reward: {reward[0].numpy(), np.mean(reward), reward[1].numpy()}")
             im = state
             # im = tf.concat([im, self.agent.pos_enc.w], 0)
             im = display_images(im)
         pbar.close()
-
         return reward[0], np.mean(reward), im
 
     def _train_step(self, actions, states, rewards, next_state):
-        c_loss = self._train_critic_step(actions, states, rewards, next_state)
+        self._train_critic_step(actions, states, rewards, next_state)
 
         self.update_count += 1
         if self.update_count % settings.Training.actor_update_interval == 0:
             self._train_actor_step(states)
-
-        return c_loss
+            self._update_targets(settings.tau)
 
     @tf.function()
     def _next(self, state):
         action = self.agent.actor(state) + tf.random.normal(state.shape) * settings.noise
         next_state = self.agent.update_img(state, action)
         reward = 1 - tf.abs(tf.squeeze(self.disc(next_state, training=False)) - 1)
-        return action, next_state, reward
+        r1 = 1 - tf.abs(tf.squeeze(self.disc(state, training=False)) - 1)
+        delta = reward - r1
+        return action, next_state, reward, delta * 100
 
     @tf.function()
     def _train_critic_step(self, actions, states, rewards, next_state):
         noise = tf.random.normal(actions.shape) * settings.noise
         next_action = self.actor_target(next_state, training=False) + noise
 
-        target_q1 = tf.squeeze(self.critic_1_target(next_state, next_action, training=False))
-        target_q2 = tf.squeeze(self.critic_2_target(next_state, next_action, training=False))
+        target_q1 = tf.squeeze(self.critic_1_target(next_state, next_action, self.delta_score, training=False))
+        target_q2 = tf.squeeze(self.critic_2_target(next_state, next_action, self.delta_score, training=False))
 
         rewards = tf.squeeze(rewards)
+        # TODO - Add curiosity factor to reward?
 
         target_q = tf.minimum(target_q1, target_q2)
         target_q = rewards + settings.discount * target_q
         target_q = tf.stop_gradient(target_q)
+
         with tf.GradientTape() as tape:
-            q1 = tf.squeeze(self.agent.critic_1(states, actions))
-            q2 = tf.squeeze(self.agent.critic_2(states, actions))
+            q1 = tf.squeeze(self.agent.critic_1(states, actions, self.delta_score))
+            q2 = tf.squeeze(self.agent.critic_2(states, actions, self.delta_score))
 
             c1_loss = tf.keras.losses.MSE(target_q, q1)
             c2_loss = tf.keras.losses.MSE(target_q, q2)
@@ -352,12 +367,11 @@ class TD3Trainer:
     @tf.function()
     def _train_actor_step(self, states):
         with tf.GradientTape() as tape:
-            a_loss = -self.agent.critic_1(states, self.agent.actor(states), training=False)
+            a_loss = -self.agent.critic_1(states, self.agent.actor(states), self.delta_score, training=False)
             a_loss = tf.reduce_mean(a_loss)
 
         grads = tape.gradient(a_loss, self.agent.actor.trainable_variables)
         self.actor_optimizer.apply_gradients(zip(grads, self.agent.actor.trainable_variables))
-        self._update_targets(settings.tau)
 
     def _update_targets(self, tau):
         for a, b in zip(self.actor_target.weights, self.agent.actor.weights):

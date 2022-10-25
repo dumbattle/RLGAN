@@ -1,8 +1,8 @@
 class TD3:
-    max_action = 3
+    max_action = 2
     noise = .1
 
-    discount = .99
+    discount = 0.9
     tau = .005
 
     class Training:
@@ -51,6 +51,7 @@ class A2C:
         critic_lr = 1e-5
         num_episodes = 10000
         gamma = .9
+
 
 class A2C_D:
     class Training:

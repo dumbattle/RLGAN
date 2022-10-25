@@ -1,12 +1,14 @@
 import cv2
 import numpy as np
 import tensorflow as tf
+from random import uniform
 
 
 def imshow(title, img):
     if img.shape[-1] == 1 or img.shape[-1] == 3:
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         cv2.imshow(title, img)
-        return
+        return img
 
     im = img
     alpha = im[..., -1]
@@ -27,10 +29,9 @@ def imshow(title, img):
     bg = bg[:h, :w]
     # Blend, using result = alpha*overlay + (1-alpha)*background
     im = ((alpha[..., None] * im + (1.0-alpha[..., None]) * bg[..., None]) * 255).astype(np.uint8)
+    img = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
 
-    im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
-
-    cv2.imshow(title, im)
+    cv2.imshow(title, img)
     return im
 
 
@@ -40,8 +41,12 @@ def generate_noisy_input(src, num=8):
     state = np.random.uniform(0, 1, [1 + num_real, *src[0].shape]).astype("float32")
 
     for i in range(num_real):
+        flip = uniform(0, 1) < 0.5
+        s = state[i + 1]
+        if flip:
+            s = cv2.flip(s, 1)
         r = i / num_real
-        state[i + 1] = state[i + 1] * r + random_samples[i] * (1 - r)
+        state[i + 1] = s * r + random_samples[i] * (1 - r)
     return state
 
 

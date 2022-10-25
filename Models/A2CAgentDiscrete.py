@@ -23,17 +23,16 @@ class PositionalEncoding(tf.keras.layers.Layer):
     def call(self, x):
         # broadcast
         e = x + self.w - x
-
         return tf.concat([x, e], -1)
 
 
 class A2CDAgent:
     def __init__(self, input_shape):
         self.input_shape = input_shape
-        self.pos_enc = PositionalEncoding()
+        # self.pos_enc = PositionalEncoding()
         a = layers.Input(shape=input_shape)
         x = a
-        x = self.pos_enc(x)
+        # x = self.pos_enc(x)
         x = UNet(x)
         x = layers.Conv2D(input_shape[-1] * 3, 1, padding="same", use_bias=False)(x)
         x = tf.reshape(x, [-1, *x.shape[1:-1], input_shape[-1], 3])
@@ -214,7 +213,7 @@ class A2CDTrainer:
         for traj in trajs:
             traj.end()
         actor_grads = None
-        critic_grads = None
+        critic_grads, critic_loss = None, 0
         for b in range(settings.Training.num_batches_per_episode-1):
             ind_start = b * settings.Training.batchsize
             ind_end = ind_start + settings.Training.batchsize
@@ -230,18 +229,19 @@ class A2CDTrainer:
                 actor_grads = [a + b for a, b in zip(actor_grads, ag)]
 
             if critic_grads is None:
-                critic_grads = cg
+                critic_grads, critic_loss = cg
             else:
-                critic_grads = [a + b for a, b in zip(critic_grads, cg)]
+                critic_loss += cg[1]
+                critic_grads = [a + b for a, b in zip(critic_grads, cg[0])]
         self.c_opt.apply_gradients(zip(critic_grads, self.critic.trainable_variables))
         self.a_opt.apply_gradients(zip(actor_grads, self.agent.actor.trainable_variables))
-
+        print(critic_loss)
         return rf[0].numpy(), np.mean(rf), im
 
     @tf.function
     def _step(self, state):
-        mean = self.agent.call(state)
-        action = self.agent.sample(mean)
+        logits = self.agent.call(state)
+        action = self.agent.sample(logits)
         next_state = self.agent.update_img(state, action)
 
         reward_s = 1 - tf.abs(tf.squeeze(self.disc(state, training=False)) - 1)
@@ -259,7 +259,7 @@ class A2CDTrainer:
         variables = self.critic.trainable_variables
         grad = tape.gradient(critic_loss, variables)
         # self.c_opt.apply_gradients(zip(grad, variables))
-        return grad
+        return grad, critic_loss
 
     @tf.function
     def _train_actor_step(self, states, actions, reward):
@@ -307,7 +307,7 @@ class A2CDTrainer:
             plt.savefig(f'{self.save_dir}/plots/rewards_{epoch}.png')
             plt.savefig(f'{self.save_dir}/plots/_rewards_current.png')
 
-            if tf.math.sigmoid(r1)  > 0.99:
+            if r1  > 0.95:
                 plt.clf()
                 break
             self.episode += 1

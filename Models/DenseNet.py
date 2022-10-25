@@ -16,7 +16,6 @@ def dense_block(inp, num_channels, num_layers=None, growth_rate=None, activation
     if activation is None:
         activation = settings.DenseNet.activation
 
-    x = None
     for i in range(num_layers):
         x = inp
         # bottleneck
@@ -25,9 +24,9 @@ def dense_block(inp, num_channels, num_layers=None, growth_rate=None, activation
         # x = layers.Conv2D(4 * growth_rate, 1, use_bias=False)(x)
 
         # conv
-        # x = tfa.layers.InstanceNormalization(axis=-1)(x)
-        x = layers.Activation(activation)(x)
         x = layers.Conv2D(growth_rate, 3, padding='same', use_bias=False)(x)
+        x = tfa.layers.InstanceNormalization(axis=-1)(x)
+        x = layers.Activation(activation)(x)
 
         # concat
         inp = layers.Concatenate()([inp, x])
@@ -41,9 +40,9 @@ def dense_block(inp, num_channels, num_layers=None, growth_rate=None, activation
 def transition(x, num_channels):
     num_channels = int(num_channels * settings.DenseNet.reduction)
 
+    x = layers.Conv2D(num_channels, 1, use_bias=False)(x)
     x = tfa.layers.InstanceNormalization(axis=-1)(x)
     x = layers.Activation(settings.DenseNet.activation)(x)
-    x = layers.Conv2D(num_channels, 1, use_bias=False)(x)
 
     x = layers.AveragePooling2D(2, strides=2)(x)
 
@@ -57,8 +56,6 @@ def DenseNet(input_shape, pool=True):
     for b in range(settings.DenseNet.num_blocks):
         x, num_channels = dense_block(x, num_channels, self_attention=b == settings.DenseNet.num_blocks - 2)
         x, num_channels = transition(x, num_channels)
-    # x = tfa.layers.InstanceNormalization(axis=-1)(x)
-    x = layers.Activation(settings.DenseNet.activation)(x)
 
     if pool:
         x = layers.GlobalAveragePooling2D()(x)

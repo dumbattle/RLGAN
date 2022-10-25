@@ -1,4 +1,4 @@
-from Models import Discriminator, TD3Agent
+from Models import Discriminator, DiscriminatorSN, Discriminator_V2, TD3Agent
 import numpy as np
 import settings
 import tensorflow as tf
@@ -40,7 +40,7 @@ for f in dataset.take(1):
 
 # load models
 
-disc = Discriminator(input_shape)
+disc = Discriminator_V2(input_shape)
 gen_input = tf.keras.Input(input_shape)
 gen_x = TD3Agent(input_shape).call(gen_input)
 gen_out = tf.keras.layers.Conv2D(input_shape[-1], 1, activation="sigmoid", padding="same", use_bias=False)(gen_x) * 1.1
@@ -52,7 +52,6 @@ discriminator_optimizer = tf.keras.optimizers.Adam(1e-4)
 
 @tf.function
 def train_step(images, noise):
-
     with tf.GradientTape() as gen_tape, tf.GradientTape() as disc_tape:
         generated_images = gen(noise)
 
@@ -70,17 +69,17 @@ def train_step(images, noise):
     return generated_images
 
 
+save_dir = 'saves/GAN Baseline SN'
 epoch = 0
 while True:
     epoch += 1
     for image_batch in dataset:
         noise = generate_noisy_input(data, settings.Discriminator.Training.batch_size)
         fake = train_step(image_batch, noise)
-        fake = display_images(fake)
     if epoch % 10 != 0:
         continue
-    if not os.path.exists(f'saves/GAN Baseline'):
-        os.makedirs(f'saves/GAN Baseline')
-
-    im = Image.fromarray(fake)
-    im.save(f"saves/GAN Baseline/{epoch}.png")
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    im = display_images(fake)
+    im = Image.fromarray(im)
+    im.save(f"{save_dir}/{epoch}.png")

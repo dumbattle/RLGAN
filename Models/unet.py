@@ -1,8 +1,9 @@
 import tensorflow as tf
 import tensorflow_addons as tfa
+from Attention import ConvSelfAttn
 
 
-def downsample(filters):
+def downsample(filters, attn=False):
     initializer = tf.random_normal_initializer(0., 0.02)
 
     result = tf.keras.Sequential()
@@ -15,6 +16,9 @@ def downsample(filters):
                                use_bias=False))
     result.add(tfa.layers.InstanceNormalization(axis=-1))
     result.add(tf.keras.layers.Activation('relu'))
+
+    if attn:
+        result.add(ConvSelfAttn(filters))
 
     #
     # result.add(tf.keras.layers.Conv2D(filters, 1, kernel_initializer=initializer, use_bias=False))
