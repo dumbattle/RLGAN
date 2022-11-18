@@ -10,7 +10,7 @@ def main():
         exists = os.path.exists(src_path)
 
         if not exists:
-            src_path = "../Source Images/" + src_path
+            src_path = "../data/Source Images/" + src_path
             exists = os.path.exists(src_path)
 
         if exists:

@@ -1,8 +1,8 @@
 import cv2
 import numpy as np
 import tensorflow as tf
-from random import uniform
-
+from random import uniform, randint, shuffle
+from PIL import Image
 
 def imshow(title, img):
     if img.shape[-1] == 1 or img.shape[-1] == 3:
@@ -33,21 +33,6 @@ def imshow(title, img):
 
     cv2.imshow(title, img)
     return im
-
-
-def generate_noisy_input(src, num=8):
-    num_real = num - 1
-    random_samples = src[np.random.choice(src.shape[0], num_real)]
-    state = np.random.uniform(0, 1, [1 + num_real, *src[0].shape]).astype("float32")
-
-    for i in range(num_real):
-        flip = uniform(0, 1) < 0.5
-        s = state[i + 1]
-        if flip:
-            s = cv2.flip(s, 1)
-        r = i / num_real
-        state[i + 1] = s * r + random_samples[i] * (1 - r)
-    return state
 
 
 def display_images(images):
@@ -96,3 +81,95 @@ def display_images(images):
     im = imshow('image', img)
     cv2.waitKey(1)
     return im
+
+
+def generate_noisy_input(src, num=8):
+    num_real = num - 1
+    random_samples = src[np.random.choice(src.shape[0], num_real)]
+
+    x2 = random_samples[:, :, :, :-1]
+    x2 = tf.image.random_hue(x2, 0.5)
+    x3 = random_samples[:, :, :, -1:]
+    random_samples = tf.concat((x2, x3), -1)
+    state = np.random.uniform(0, 1, [1 + num_real, *src[0].shape]).astype("float32")
+
+    for i in range(num_real):
+        flip = uniform(0, 1) < 0.5
+        s = state[i + 1]
+        if flip:
+            s = cv2.flip(s, 1)
+        r = i / num_real
+        state[i + 1] = s * r + random_samples[i] * (1 - r)
+    return state
+
+
+def generate_blotched_input(src, num=8, scale=True):
+    result = src[np.random.choice(len(src), num)]
+
+    x2 = result[:, :, :, :-1]
+    x2 = tf.image.random_hue(x2, 0.5)
+    x3 = result[:, :, :, -1:]
+    result = tf.concat((x2, x3), -1).numpy()
+    for i in range(num):
+        sprite_arr = result[i]
+
+        if num != 1 and scale:
+            sprite_arr = blotch(sprite_arr, int(5 * (num - i - 1) / (num - 1)))
+        else:
+            sprite_arr = blotch(sprite_arr, 5)
+
+        result[i] = sprite_arr
+    return result
+
+
+def blotch(sprite, iterations):
+    result = sprite
+    indicies = list(np.ndindex((result.shape[0] - 2, result.shape[1] - 2)))
+    for _ in range(iterations):
+        shuffle(indicies)
+        for x, y in indicies:
+            # x = randint(1, result.shape[0] - 2)
+            # y = randint(1, result.shape[1] - 2)
+            x += 1
+            y += 1
+            n = result[x-1:x+2, y-1:y+2, :]
+            n = np.reshape(n, [9, n.shape[-1]])
+            nb = np.expand_dims(n, 1)
+            w = n == nb
+            w = w.all(axis=-1)
+            if w.all():
+                continue
+            w = np.where(w, 1, 0)
+
+            w = np.sum(w, 0)
+            w = np.reshape(w, [-1])
+            w[4] = 0
+            if n.shape[-1] == 4:
+                w = np.where((n == [0, 0, 0, 1]).all(axis=-1), 0.1, w)
+            else:
+                w = np.where((n == [0, 0, 1]).all(axis=-1), 0.1, w)
+            w = np.square(w)
+
+            choice = np.random.choice(9, 1, p=[x / sum(w) for x in w])
+            result[x, y] = n[choice.item()]
+    if np.amax(result) == 0:
+        return blotch(sprite, iterations)
+    return result
+
+
+def generate_blotched_demo(src, count=3, steps=5, iter_per_step=1):
+    results = []
+    for i in range(count):
+        im = src[np.random.choice(len(src), 1)][0]
+        im_prog = [im.copy()]
+        prog = im
+        for i in range(steps):
+            prog = blotch(prog, iter_per_step)
+            im_prog.append(prog.copy())
+        results.append(cv2.hconcat(im_prog))
+    results = cv2.vconcat(results)
+
+    im = Image.fromarray((results * 255).astype(np.uint8))
+
+    im.save(f"saves/blotch demo.png")
+    return results

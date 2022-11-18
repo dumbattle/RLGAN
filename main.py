@@ -3,7 +3,8 @@ import settings
 from tqdm import tqdm
 import os
 import tensorflow as tf
-from utils import generate_noisy_input
+from utils import generate_noisy_input, generate_blotched_input, display_images, generate_blotched_demo
+import matplotlib.pyplot as plt
 
 def pad(x):
     return tf.pad(x, [[0, 0], [0, 1], [11, 12], [0, 0]])
@@ -97,7 +98,7 @@ def load_A2C_2():
 
 
 def load_TD3_C10():
-    dir = "saves/TD3-C10"
+    dir = "saves/TD3-C10-B"
 
     (x_train, y_train), (x_test, y_test) = tf.keras.datasets.cifar10.load_data()
     data = x_train
@@ -116,7 +117,7 @@ def load_TD3_C10():
     agent = TD3Agent(input_shape)
     d_buf = DiscriminatorBuffer(10000, input_shape)
 
-    d_trainer = DiscriminatorTrainer(d_buf, dataset, discriminator, dir)
+    d_trainer = DiscriminatorTrainer(d_buf, dataset, discriminator, dir, data)
     d_trainer.load()
 
     g_trainer = TD3Trainer(agent, discriminator, data, dir)
@@ -131,7 +132,7 @@ def load_TD3_1():
         x2 = tf.image.random_hue(x2, 0.5)
         x3 = x[:, :, :, -1:]
         return tf.concat((x2, x3), -1)
-
+    dir = "saves/TD3-B-3"
     data = np.load(settings.dataset_path)
 
     data = data.astype("float32")
@@ -142,9 +143,9 @@ def load_TD3_1():
     dataset = tf.data.Dataset\
         .from_tensor_slices(data)\
         .shuffle(data.shape[0])\
-        .batch(settings.Discriminator.Training.batch_size, True)
-        # .map(lambda x: augment(x),
-        #         num_parallel_calls=tf.data.AUTOTUNE)
+        .batch(settings.Discriminator.Training.batch_size, True)\
+        .map(lambda x: augment(x),
+                num_parallel_calls=tf.data.AUTOTUNE)
 
     for f in dataset.take(1):
         input_shape = f.shape[1:]
@@ -153,12 +154,12 @@ def load_TD3_1():
     agent = TD3Agent(input_shape)
     d_buf = DiscriminatorBuffer(10000, input_shape)
 
-    d_trainer = DiscriminatorTrainer(d_buf, dataset, discriminator, "saves/TD3-1")
+    d_trainer = DiscriminatorTrainer(d_buf, dataset, discriminator, dir, data)
     d_trainer.load()
 
-    g_trainer = TD3Trainer(agent, d_trainer.disc, data, "saves/TD3-1")
+    g_trainer = TD3Trainer(agent, d_trainer.disc, data, dir)
     g_trainer.load()
-    return discriminator, agent, d_trainer, g_trainer, d_buf, "saves/TD3-1"
+    return discriminator, agent, d_trainer, g_trainer, d_buf, dir
 
 
 def load_TD3_2():
@@ -229,7 +230,7 @@ def load_TD3_3():
     data = np.load(settings.dataset_path)
 
     data = data.astype("float32")
-    data /= 255
+    data /= 255.0
 
     data = pad(data).numpy()
 
@@ -256,7 +257,7 @@ def load_TD3_3():
 def run(agent, d_buf, g_trainer, d_trainer, save_dir):
     @tf.function
     def _buf_init_step():
-        return agent.generate()
+        return agent.generate(generate_blotched_input(g_trainer.real, 1))
 
     epoch = 0
     current_phase = 0
@@ -265,7 +266,6 @@ def run(agent, d_buf, g_trainer, d_trainer, save_dir):
         with np.load(f'{save_dir}/state.npz') as f:
             epoch = f['epoch']
             current_phase = f['current_phase']
-    current_phase = 1
 
     # train loop
     while True:
@@ -274,8 +274,8 @@ def run(agent, d_buf, g_trainer, d_trainer, save_dir):
             current_phase = 1
 
         elif current_phase == 1:
-            for _ in tqdm(range(200), "Updating Discriminator Buffer"):
-                d_buf.add(_buf_init_step())
+            # for _ in tqdm(range(64), "Updating Discriminator Buffer"):
+            #     d_buf.add(_buf_init_step())
             d_trainer.train(1000, agent)
             current_phase = 2
 
@@ -288,25 +288,61 @@ def run(agent, d_buf, g_trainer, d_trainer, save_dir):
         np.savez(f'{save_dir}/state', current_phase=current_phase, epoch=epoch)
 
 
-def demo(agent):
+def demo(agent, data):
     while True:
-        agent.generate(steps=500, count=9, display=True)
+        img = generate_blotched_input(data, 16)
+        agent.generate(img=img, steps=500, count=9, display=True)
 
 
 def main():
     # discriminator, agent, d_trainer, g_trainer, d_buf, save_dir = load_TD3_SN()
     # discriminator, agent, d_trainer, g_trainer, d_buf, save_dir = load_TD3_C10()
-    discriminator, agent, d_trainer, g_trainer, d_buf, save_dir = load_TD3_1()
+    # discriminator, agent, d_trainer, g_trainer, d_buf, save_dir = load_TD3_1()
     # discriminator, agent, d_trainer, g_trainer, d_buf, save_dir = load_TD3_2()
     # discriminator, agent, d_trainer, g_trainer, d_buf, save_dir = load_TD3_3()
     # discriminator, agent, d_trainer, g_trainer, d_buf, save_dir = load_A2C_1()
     # discriminator, agent, d_trainer, g_trainer, d_buf, save_dir = load_A2C_2()
     # discriminator, agent, d_trainer, g_trainer, d_buf, save_dir = load_A2CD_1()
 
-    run(agent, d_buf, g_trainer, d_trainer, save_dir)
-    # demo(agent)
+    # print(discriminator(generate_noisy_input(g_trainer.real, 256)))
 
-    # print(discriminator(generate_noisy_input(g_trainer.real, 64)))
+    # run(agent, d_buf, g_trainer, d_trainer, save_dir)
+    # demo(agent, g_trainer.real)
+    data = np.load(settings.dataset_path)
+
+    data = data.astype("float32")
+    data /= 255
+
+    data = pad(data).numpy()
+    # a = generate_blotched_demo(data)
+    # while True:
+    # #     a = generate_blotched_input(data, 9)
+    #     display_images([a])
+    #     # display_images(np.array([a]))
+    #     pass
+    # a = data[75]
+    # c = tf.random.uniform(a.shape, 0, 1)
+    # b = a * .95 + c * .05
+    #
+    # plt.figure()
+    # for i in range(3):
+    #     plt.subplot(1, 4, i + 1)
+    #     plt.title(["Score: 0.99", "Score: 0.01", "Score: 0.00"][i])
+    #     plt.imshow([a, b, c][i])
+    #     plt.axis('off')
+    # plt.show()
+    # while True:
+    #     pass
+    #     # display_images(np.array([a, b, c]))
+
+    sample = data[np.random.choice(len(data), 16)]
+    display_images(sample)
+
+    im = Image.fromarray((sample * 255).astype(np.uint8))
+    im.save(f"saves/Data demo.png")
+    while True:
+        display_images(sample)
+        pass
 
 
 if __name__ == "__main__":

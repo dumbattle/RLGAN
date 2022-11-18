@@ -6,12 +6,12 @@ from tqdm import tqdm
 
 from settings import TD3 as settings
 import numpy as np
-from utils import generate_noisy_input, display_images
+from utils import generate_noisy_input, display_images,generate_blotched_input
 import matplotlib.pyplot as plt
 from Discriminator import Discriminator, DiscriminatorSN, Discriminator_V2
 from PIL import Image
 from unet import UNet
-
+import cv2
 
 # learn encoding rather than hard code since shape and size are always constant
 class PositionalEncoding(tf.keras.layers.Layer):
@@ -35,7 +35,7 @@ class TD3Agent:
         self.v2 = v2
         a = layers.Input(shape=input_shape)
         x = a
-        x = PositionalEncoding()(x)
+        # x = PositionalEncoding()(x)
 
         x = UNet(x)
 
@@ -44,6 +44,7 @@ class TD3Agent:
         self.actor = tf.keras.Model(inputs=a, outputs=mean)
         self.critic_1 = _Critic(input_shape, spectral_norm, v2)
         self.critic_2 = _Critic(input_shape, spectral_norm, v2)
+        self.real = None
 
     def save(self, save_dir):
         self.actor.save_weights(f'{save_dir}/actor/model')
@@ -64,7 +65,9 @@ class TD3Agent:
         if steps is None:
             steps = settings.Training.max_episode_length
 
-        for s in range(steps):
+        e = tqdm(range(steps), "Generating") if display else range(steps)
+        for s in e:
+
             img = self.generate_step(img)
             if display:
                 display_images(img)
@@ -73,7 +76,7 @@ class TD3Agent:
 
     @tf.function
     def generate_step(self, img):
-        action = self.call(img, training=False)
+        action = self.call(img, training=False) + tf.random.normal(img.shape) * settings.noise
         img = self.update_img(img, action)
         return img
 
@@ -197,6 +200,8 @@ class TD3Trainer:
         self.critic_1_target.set_weights(self.agent.critic_1.get_weights())
         self.critic_2_target.set_weights(self.agent.critic_2.get_weights())
 
+        print(self.actor_optimizer.lr)
+        print(self.critic_optimizer.lr)
         self.update_count = 0
         self.scores_1st = []
         self.scores_avg = []
@@ -244,8 +249,6 @@ class TD3Trainer:
         self.actor_target.load_weights(f'{self.save_dir}/TD3/model/actor_target/model')
         self.critic_1_target.load_weights(f'{self.save_dir}/TD3/model/critic_1_target/model')
         self.critic_2_target.load_weights(f'{self.save_dir}/TD3/model/critic_2_target/model')
-        print(self.actor_optimizer.beta_1)
-        print(self.critic_optimizer.beta_1)
 
         others = np.load(f"{self.save_dir}/TD3/other.npz")
         self.scores_1st = list(others['plot_a'])
@@ -254,8 +257,6 @@ class TD3Trainer:
         others.close()
 
     def run(self, epoch):
-        if self.episode == 0:
-            self._update_targets(1)
         im = None
         while self.episode < settings.Training.num_episodes:
             r1, r2, im = self._run_episode(epoch)
@@ -284,12 +285,17 @@ class TD3Trainer:
 
         if not os.path.exists(f'{self.save_dir}/generated'):
             os.makedirs(f'{self.save_dir}/generated')
-        im = Image.fromarray(im)
+        if im.shape[-1] == 4:
+            im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
+            im = Image.fromarray(im)
+        else:
+            im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
+            im = Image.fromarray((im * 255).astype(np.uint8))
         im.save(f"{self.save_dir}/generated/{epoch}.png")
 
     def _run_episode(self, epoch):
-        state = generate_noisy_input(self.real)
-        real = state[1]
+        state = generate_blotched_input(self.real)
+        real = state[-1]
         reward = None
         pbar = tqdm(
             range(settings.Training.max_episode_length),
@@ -310,11 +316,13 @@ class TD3Trainer:
                 states, actions, rewards, next_state = self.buffer.sample()
                 self._train_step(actions, states, rewards, next_state)
 
-            pbar.set_postfix_str(f"Reward: {reward[0].numpy(), np.mean(reward), reward[1].numpy()}")
+            pbar.set_postfix_str(f"Reward: {reward[0].numpy(), np.mean(reward), reward[-1].numpy()}")
             im = state
             # im = tf.concat([im, self.agent.pos_enc.w], 0)
-            im = display_images(im)
+            if step % 20 == 0:
+                display_images(im)
         pbar.close()
+        im = display_images(state)
         return reward[0], np.mean(reward), im
 
     def _train_step(self, actions, states, rewards, next_state):
@@ -337,13 +345,12 @@ class TD3Trainer:
     @tf.function()
     def _train_critic_step(self, actions, states, rewards, next_state):
         noise = tf.random.normal(actions.shape) * settings.noise
-        next_action = self.actor_target(next_state, training=False) + noise
+        next_action = self.actor_target(next_state, training=False)
 
         target_q1 = tf.squeeze(self.critic_1_target(next_state, next_action, self.delta_score, training=False))
         target_q2 = tf.squeeze(self.critic_2_target(next_state, next_action, self.delta_score, training=False))
 
         rewards = tf.squeeze(rewards)
-        # TODO - Add curiosity factor to reward?
 
         target_q = tf.minimum(target_q1, target_q2)
         target_q = rewards + settings.discount * target_q
