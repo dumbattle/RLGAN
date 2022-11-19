@@ -297,7 +297,7 @@ def demo(agent, data):
 def main():
     # discriminator, agent, d_trainer, g_trainer, d_buf, save_dir = load_TD3_SN()
     # discriminator, agent, d_trainer, g_trainer, d_buf, save_dir = load_TD3_C10()
-    # discriminator, agent, d_trainer, g_trainer, d_buf, save_dir = load_TD3_1()
+    discriminator, agent, d_trainer, g_trainer, d_buf, save_dir = load_TD3_1()
     # discriminator, agent, d_trainer, g_trainer, d_buf, save_dir = load_TD3_2()
     # discriminator, agent, d_trainer, g_trainer, d_buf, save_dir = load_TD3_3()
     # discriminator, agent, d_trainer, g_trainer, d_buf, save_dir = load_A2C_1()
@@ -306,14 +306,14 @@ def main():
 
     # print(discriminator(generate_noisy_input(g_trainer.real, 256)))
 
-    # run(agent, d_buf, g_trainer, d_trainer, save_dir)
+    run(agent, d_buf, g_trainer, d_trainer, save_dir)
     # demo(agent, g_trainer.real)
-    data = np.load(settings.dataset_path)
-
-    data = data.astype("float32")
-    data /= 255
-
-    data = pad(data).numpy()
+    # data = np.load(settings.dataset_path)
+    #
+    # data = data.astype("float32")
+    # data /= 255
+    #
+    # data = pad(data).numpy()
     # a = generate_blotched_demo(data)
     # while True:
     # #     a = generate_blotched_input(data, 9)
@@ -335,14 +335,14 @@ def main():
     #     pass
     #     # display_images(np.array([a, b, c]))
 
-    sample = data[np.random.choice(len(data), 16)]
-    display_images(sample)
-
-    im = Image.fromarray((sample * 255).astype(np.uint8))
-    im.save(f"saves/Data demo.png")
-    while True:
-        display_images(sample)
-        pass
+    # sample = data[np.random.choice(len(data), 16)]
+    # sample2 = display_images(sample, False)
+    #
+    # im = Image.fromarray(sample2)
+    # im.save(f"saves/Data demo.png")
+    # while True:
+    #     display_images(sample, False)
+    #     pass
 
 
 if __name__ == "__main__":

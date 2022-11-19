@@ -231,7 +231,7 @@ class DiscriminatorTrainer:
                 fake_gen = gen.generate(count=half_batch, img=generate_blotched_input(self.data))
                 n = tf.random.uniform([half_batch], 0, 1)
                 for i in range(half_batch):
-                    rn[i] = blotch(rn[i], int(5 * n[i]))
+                    rn[i] = rn[i]
                 loss = self._disc_train_step(rr, fake_buf, fake_gen, rn, n)
 
                 total_loss += loss.numpy()

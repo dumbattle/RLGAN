@@ -237,7 +237,7 @@ class TD3Trainer:
         c_opt_weights = [c_opt_weights_data[x] for x in c_opt_weights_data.files]
         states, actions, rewards, next_states = self.buffer.get_init_sample()
         self._train_critic_step(actions, states, rewards, next_states)
-        self._train_actor_step(states)
+        self._train_actor_step(states, states)
 
         self.actor_optimizer.set_weights(a_opt_weights)
         self.critic_optimizer.set_weights(c_opt_weights)
@@ -309,12 +309,11 @@ class TD3Trainer:
             rr = delta if self.delta_score else reward
             for s, a, r, n in zip(state, action, rr, next_state):
                 self.buffer.add(s, a, r, n)
-
             state = next_state
 
             if self.buffer.count >= settings.Training.batch_size:
                 states, actions, rewards, next_state = self.buffer.sample()
-                self._train_step(actions, states, rewards, next_state)
+                self._train_step(actions, states, rewards, next_state, self.real[np.random.choice(len(self.real), settings.Training.batch_size)])
 
             pbar.set_postfix_str(f"Reward: {reward[0].numpy(), np.mean(reward), reward[-1].numpy()}")
             im = state
@@ -325,12 +324,12 @@ class TD3Trainer:
         im = display_images(state)
         return reward[0], np.mean(reward), im
 
-    def _train_step(self, actions, states, rewards, next_state):
+    def _train_step(self, actions, states, rewards, next_state, real):
         self._train_critic_step(actions, states, rewards, next_state)
 
         self.update_count += 1
         if self.update_count % settings.Training.actor_update_interval == 0:
-            self._train_actor_step(states)
+            self._train_actor_step(states, real)
             self._update_targets(settings.tau)
 
     @tf.function()
@@ -355,7 +354,6 @@ class TD3Trainer:
         target_q = tf.minimum(target_q1, target_q2)
         target_q = rewards + settings.discount * target_q
         target_q = tf.stop_gradient(target_q)
-
         with tf.GradientTape() as tape:
             q1 = tf.squeeze(self.agent.critic_1(states, actions, self.delta_score))
             q2 = tf.squeeze(self.agent.critic_2(states, actions, self.delta_score))
@@ -372,11 +370,14 @@ class TD3Trainer:
         return c1_loss
 
     @tf.function()
-    def _train_actor_step(self, states):
+    def _train_actor_step(self, states, real):
         with tf.GradientTape() as tape:
             a_loss = -self.agent.critic_1(states, self.agent.actor(states), self.delta_score, training=False)
             a_loss = tf.reduce_mean(a_loss)
 
+            real_out = self.agent.actor(real)
+            real_loss = tf.reduce_mean(tf.square(real_out - tf.zeros_like(real_out)))
+            a_loss += real_loss
         grads = tape.gradient(a_loss, self.agent.actor.trainable_variables)
         self.actor_optimizer.apply_gradients(zip(grads, self.agent.actor.trainable_variables))
 

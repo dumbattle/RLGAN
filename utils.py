@@ -4,7 +4,7 @@ import tensorflow as tf
 from random import uniform, randint, shuffle
 from PIL import Image
 
-def imshow(title, img):
+def imshow(title, img, checker):
     if img.shape[-1] == 1 or img.shape[-1] == 3:
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         cv2.imshow(title, img)
@@ -22,7 +22,10 @@ def imshow(title, img):
         longer = w
 
     # Make a checkerboard background image same size, dark squares are grey(102), light squares are grey(152)
-    bg = np.fromfunction(np.vectorize(lambda i, j: .5 + .25 * ((i+j) % 2)), (int(longer / 25), int(longer / 25)))
+    if checker:
+        bg = np.fromfunction(np.vectorize(lambda i, j: .5 + .25 * ((i+j) % 2)), (int(longer / 25), int(longer / 25)))
+    else:
+        bg = np.ones([int(longer / 25), int(longer / 25)], dtype=np.float)
     bg = cv2.resize(bg, (longer, longer), interpolation=cv2.INTER_NEAREST)
 
     # Trim to correct size
@@ -35,7 +38,7 @@ def imshow(title, img):
     return im
 
 
-def display_images(images):
+def display_images(images, checker=True):
     pow2val = 1
     pow2 = 0
 
@@ -78,7 +81,7 @@ def display_images(images):
     img = cv2.resize(img, (img.shape[1] * 5, img.shape[0] * 5), interpolation=cv2.INTER_NEAREST)
     if len(img.shape) == 2:
         img = np.reshape(img, (*img.shape, 1))
-    im = imshow('image', img)
+    im = imshow('image', img, checker)
     cv2.waitKey(1)
     return im
 
