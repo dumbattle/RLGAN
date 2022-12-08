@@ -3,6 +3,8 @@ import numpy as np
 import tensorflow as tf
 from random import uniform, randint, shuffle
 from PIL import Image
+from glob import glob
+
 
 def imshow(title, img, checker):
     if img.shape[-1] == 1 or img.shape[-1] == 3:
@@ -113,6 +115,7 @@ def generate_blotched_input(src, num=8, scale=True):
     x2 = tf.image.random_hue(x2, 0.5)
     x3 = result[:, :, :, -1:]
     result = tf.concat((x2, x3), -1).numpy()
+
     for i in range(num):
         sprite_arr = result[i]
 

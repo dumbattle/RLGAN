@@ -11,11 +11,27 @@ import os
 from PIL import Image
 
 
+class PositionalEncoding(tf.keras.layers.Layer):
+    def __init__(self):
+        super(PositionalEncoding, self).__init__()
+        self.w = None
+
+    def build(self, input_shape):
+        self.w = self.add_weight("pos embedding", shape=[1, *input_shape[1:]], initializer=tf.keras.initializers.RandomNormal())
+
+    def call(self, x):
+        # broadcast
+        e = x + self.w - x
+        return tf.concat([x, e], -1)
+
 class A2CAgent:
     def __init__(self, input_shape, max_action, mask_prob):
         self.input_shape = input_shape
+
+        self.pos_enc = PositionalEncoding()
         a = layers.Input(shape=input_shape)
         x = a
+        # x = self.pos_enc(x)
         x = UNet(x)
         mean = layers.Conv2D(input_shape[-1], 1, activation="tanh", padding="same", use_bias=False)(x) * max_action
 

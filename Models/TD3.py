@@ -6,12 +6,13 @@ from tqdm import tqdm
 
 from settings import TD3 as settings
 import numpy as np
-from utils import generate_noisy_input, display_images,generate_blotched_input
+from utils import generate_noisy_input, display_images, generate_blotched_input
 import matplotlib.pyplot as plt
 from Discriminator import Discriminator, DiscriminatorSN, Discriminator_V2
 from PIL import Image
 from unet import UNet
 import cv2
+
 
 # learn encoding rather than hard code since shape and size are always constant
 class PositionalEncoding(tf.keras.layers.Layer):
@@ -35,11 +36,12 @@ class TD3Agent:
         self.v2 = v2
         a = layers.Input(shape=input_shape)
         x = a
-        # x = PositionalEncoding()(x)
+        x = PositionalEncoding()(x)
 
         x = UNet(x)
 
         mean = layers.Conv2D(input_shape[-1], 1, activation="tanh", padding="same", use_bias=False)(x)
+        # mean = layers.Conv2D(input_shape[-1], 3, activation="tanh", padding="same", use_bias=False)(x)
 
         self.actor = tf.keras.Model(inputs=a, outputs=mean)
         self.critic_1 = _Critic(input_shape, spectral_norm, v2)
@@ -67,7 +69,6 @@ class TD3Agent:
 
         e = tqdm(range(steps), "Generating") if display else range(steps)
         for s in e:
-
             img = self.generate_step(img)
             if display:
                 display_images(img)
@@ -285,13 +286,9 @@ class TD3Trainer:
 
         if not os.path.exists(f'{self.save_dir}/generated'):
             os.makedirs(f'{self.save_dir}/generated')
-        if im.shape[-1] == 4:
+        if im.shape[-1] != 4:
             im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
-            im = Image.fromarray(im)
-        else:
-            im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
-            im = Image.fromarray((im * 255).astype(np.uint8))
-        im.save(f"{self.save_dir}/generated/{epoch}.png")
+        cv2.imwrite(f"{self.save_dir}/generated/{epoch}.png", im)
 
     def _run_episode(self, epoch):
         state = generate_blotched_input(self.real)
@@ -375,9 +372,9 @@ class TD3Trainer:
             a_loss = -self.agent.critic_1(states, self.agent.actor(states), self.delta_score, training=False)
             a_loss = tf.reduce_mean(a_loss)
 
-            real_out = self.agent.actor(real)
-            real_loss = tf.reduce_mean(tf.square(real_out - tf.zeros_like(real_out)))
-            a_loss += real_loss
+            # real_out = self.agent.actor(real)
+            # real_loss = tf.reduce_mean(tf.square(real_out))
+            # a_loss += real_loss
         grads = tape.gradient(a_loss, self.agent.actor.trainable_variables)
         self.actor_optimizer.apply_gradients(zip(grads, self.agent.actor.trainable_variables))
 

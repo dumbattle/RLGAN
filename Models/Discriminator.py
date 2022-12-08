@@ -81,7 +81,7 @@ def Discriminator(input_shape):
     x = tfa.layers.InstanceNormalization(axis=-1)(x)
     x = layers.Activation('relu')(x)
     x = layers.AveragePooling2D(2, strides=2)(x)
-    # x = ConvSelfAttn(512)(x)
+    x = ConvSelfAttn(512)(x)
     # block 5
     x = layers.Conv2D(512, 3, padding='same', use_bias=False)(x)
     x = tfa.layers.InstanceNormalization(axis=-1)(x)
@@ -197,7 +197,7 @@ class DiscriminatorTrainer:
         real_noise_loss = tf.reduce_sum(self.loss(real_noise_labels, real_noise_output)) * 0.01
         fake_loss = tf.reduce_sum(self.loss(tf.zeros_like(fake_output), fake_output))
         total_loss = real_noise_loss + fake_loss + real_real_loss
-        return total_loss,  fake_loss + real_real_loss
+        return total_loss
 
     @tf.function()
     def _disc_train_step(self, real, fake_buf, fake_gen, real_noise, noise_val):
@@ -208,11 +208,11 @@ class DiscriminatorTrainer:
             real_noise_out = self.disc(real_noise, training=True)
             fake_out = self.disc(fake, training=True)
 
-            loss, tracked_loss = self._discriminator_loss(real_real_out, real_noise_out, 1 - noise_val, fake_out)
+            loss = self._discriminator_loss(real_real_out, real_noise_out, 1 - noise_val, fake_out)
 
         grads = tape.gradient(loss, self.disc.trainable_variables)
         self.optimizer.apply_gradients(zip(grads, self.disc.trainable_variables))
-        return tracked_loss
+        return loss
 
     def train(self, num_epochs, gen):
         for e in range(num_epochs):
@@ -230,8 +230,10 @@ class DiscriminatorTrainer:
                 fake_buf = self.buffer.sample(half_batch)
                 fake_gen = gen.generate(count=half_batch, img=generate_blotched_input(self.data))
                 n = tf.random.uniform([half_batch], 0, 1)
+
                 for i in range(half_batch):
-                    rn[i] = rn[i]
+                    rn[i] = rn[i] * (1 - n[i]) + np.random.uniform(0, 1, rn[i].shape) * n[i]
+
                 loss = self._disc_train_step(rr, fake_buf, fake_gen, rn, n)
 
                 total_loss += loss.numpy()

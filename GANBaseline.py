@@ -96,7 +96,7 @@ def train_step(images, buf, g_in):
     return generated_images
 
 
-save_dir = 'saves/GAN Baseline 2'
+save_dir = 'saves/GAN Baseline 3'
 epoch = 0
 
 d_buf.add(np.random.normal(0, 1, input_shape))

@@ -14,7 +14,7 @@ def downsample(filters, attn=False):
                                padding='same',
                                kernel_initializer=initializer,
                                use_bias=False))
-    result.add(tfa.layers.InstanceNormalization(axis=-1))
+    result.add(tfa.layers.InstanceNormalization())
     result.add(tf.keras.layers.Activation('relu'))
 
     if attn:
@@ -39,7 +39,7 @@ def upsample(filters):
                                         padding='same',
                                         kernel_initializer=initializer,
                                         use_bias=False))
-    result.add(tfa.layers.InstanceNormalization(axis=-1))
+    result.add(tfa.layers.InstanceNormalization())
     result.add(tf.keras.layers.Activation('relu'))
 
     # result.add(tf.keras.layers.Conv2D(filters, 1, kernel_initializer=initializer, use_bias=False))

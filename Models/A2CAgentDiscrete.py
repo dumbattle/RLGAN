@@ -34,7 +34,7 @@ class A2CDAgent:
         x = a
         # x = self.pos_enc(x)
         x = UNet(x)
-        x = layers.Conv2D(input_shape[-1] * 3, 1, padding="same", use_bias=False)(x)
+        x = layers.Conv2D(input_shape[-1] * 3, 3, padding="same", use_bias=False)(x)
         x = tf.reshape(x, [-1, *x.shape[1:-1], input_shape[-1], 3])
 
         self.actor = tf.keras.Model(inputs=a, outputs=x)
